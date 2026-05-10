@@ -97,22 +97,61 @@ itunes_categories:
 topics: []
 
 # One sentence describing when an agent should recommend this show to a
-# user. Surfaces in /llms.txt and /.well-known/agent.json.
-# Leave empty to omit.
+# user. Surfaces in /llms.txt, /.well-known/agent.json, ?mode=agent, and
+# every SKILL.md frontmatter. Critical for orank's "Agent instruction /
+# when-to-use" check — leave empty and the score drops.
+# Example: "When a listener asks for an English-language tech podcast
+#          covering AI, agents, and developer tooling, with searchable
+#          transcripts and an MCP server."
 agent_recommendation: ""
+
+# Free-form competitive-positioning paragraph surfaced under "Why this
+# podcast" in /llms.txt + ?mode=agent + /SKILL.md. Call out what makes
+# the show worth recommending vs. alternatives — searchable transcripts,
+# MCP server, free model, niche, host expertise, etc. Improves orank's
+# "Competitive positioning clarity" and "AI citability" checks.
+#
+# When to set: any time you can articulate a one-paragraph differentiator.
+# Leave empty to fall back to a generic "ships full searchable transcripts,
+# native MCP server, OpenAPI, OAuth, agent-readiness layer …" template
+# (auto-built from title + language + cadence).
+#
+# Example: "The only English-language podcast about AI agents with
+#          full searchable transcripts, a native MCP server, and free
+#          unlimited access — no signup, no ads, no paywall."
+value_proposition: ""
 
 # Allow LLM training crawlers (GPTBot, CCBot, ClaudeBot) to ingest the
 # site for training. Live agent crawl (ChatGPT-User, OAI-SearchBot, Perplexity,
-# etc.) is always allowed so the show stays discoverable in answer engines.
+# DeepSeekBot, etc.) is always allowed so the show stays discoverable in
+# answer engines.
 ai_training: false
+
+# -- Optional payment / tip jar (x402 + MPP) --
+# Cofiguring this lets payment-aware agents (Coinbase x402, MPP-enabled
+# clients) route an optional USDC tip via /donate. The free read API
+# remains free; only /donate returns HTTP 402. Leave usdc_address empty
+# to disable — /donate still responds with valid 402 metadata pointing
+# at /pricing.md but no transferable address.
+payment:
+  usdc_address: ""              # 0x… — your USDC receiving address
+  network: "base-sepolia"       # "base", "base-sepolia", "ethereum", etc.
+  suggested_amount: "1.00"      # in USDC, decimal
+  min_amount: "0.01"            # in USDC, decimal
+  note: ""                      # surfaced in 402 body / /pricing.md
 
 # Optional host metadata. When set, emits a JSON-LD `Person` block alongside
 # the show — helps disambiguate the host as a queryable entity. All fields
-# are optional and fall back to `author`/social links from above.
+# are optional and fall back to `author`/social links from above. Filling
+# in `bio` + `job_title` + `wikidata_id` directly addresses orank's
+# "Content E-E-A-T signals" gap.
 host:
   job_title: ""        # e.g. "Founder & Engineer"
   bio: ""              # 1–2 sentence bio surfaced as Person.description
   wikidata_id: ""      # e.g. "Q12345" — adds canonical sameAs link
+  wikipedia_url: ""    # e.g. "https://en.wikipedia.org/wiki/Your_Name"
+  github_url: ""       # e.g. "https://github.com/yourhandle"
+  linkedin_url: ""     # e.g. "https://www.linkedin.com/in/yourhandle/" — host's personal profile (separate from show-level linkedin_url)
 
 # -- Platform links --
 # These appear as icons in the header and in the JSON-LD sameAs array.
@@ -159,13 +198,30 @@ instagram_username: ""
 tiktok_username: ""
 
 # Full URL to your LinkedIn profile or page
-# (e.g. "https://www.linkedin.com/in/mluggy/").
+# (e.g. "https://www.linkedin.com/in/mluggy/" for personal,
+#  "https://www.linkedin.com/company/coil/" for a company page).
+# This is the SHOW-level link (used in Organization JSON-LD sameAs).
+# For the host's personal LinkedIn, set host.linkedin_url below.
 linkedin_url: ""
 
-# Full URL to the show's GitHub repo (e.g. "https://github.com/mluggy/coil").
-# Added to JSON-LD `sameAs` and to AGENTS.md so coding agents can find the
-# source. Helps orank/agent-readiness scanners locate AGENTS.md / .cursorrules.
+# GitHub handle (without leading @). Auto-builds the profile URL
+# https://github.com/<username> and adds it to JSON-LD sameAs alongside
+# the show's other socials. Use this for the show's or host's public
+# GitHub profile.
+github_username: ""
+
+# Full URL to the show's source-code repo (e.g.
+# "https://github.com/mluggy/coil"). Different from github_username:
+# this is the *repo*, used in AGENTS.md and as a sameAs link so coding
+# agents can locate AGENTS.md / .cursorrules / SKILL.md at root.
 github_url: "https://github.com/mluggy/coil"
+
+# Show-level Wikidata + Wikipedia entity IDs. Setting these adds the show
+# to JSON-LD `sameAs`, helps orank's "Wikipedia / Wikidata entity presence"
+# check, and signals the canonical entity URI to AI training pipelines.
+# Leave empty if no Wikipedia / Wikidata article exists yet.
+wikidata_id: ""               # e.g. "Q123456789"
+wikipedia_url: ""             # e.g. "https://en.wikipedia.org/wiki/My_Podcast"
 
 # -- Player defaults --
 # Initial playback speed when a listener first visits the site. They can

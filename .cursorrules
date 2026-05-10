@@ -1,0 +1,18 @@
+See AGENTS.md at the repo root for full agent guidance on contributing to the
+coil platform. Highlights:
+
+- Static-data driven. No databases, no auth in functions/. Every agent
+  endpoint resolves against committed JSON/markdown artifacts.
+- {{SITE_URL}} placeholders, rewritten per request by functions/_middleware.js.
+  New placeholder-bearing artifacts must be added to SITE_URL_REWRITES.
+- Generators in scripts/ must be idempotent. scripts/build-all.js runs them
+  in series; output must be byte-stable modulo timestamps.
+- No new runtime dependencies in functions/. Cloudflare Workers cold-start
+  budget is tight. Reuse existing helpers (esc, getBaseUrl, linkHeader,
+  securityHeaders).
+- Don't break upstream-frozen files (podcast.yaml, episodes/episodes.yaml,
+  episode media, public/cover.png, wrangler.toml). They're listed in
+  .gitattributes with merge=ours so downstream forks keep their content.
+- For listener-facing agent surfaces (the deployment), see public/AGENTS.md.
+
+When unsure, run `npm run build && npm test` before suggesting a change.

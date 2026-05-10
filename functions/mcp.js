@@ -266,6 +266,28 @@ export async function handleMcpPost(request) {
       },
       serverInfo: SERVER_INFO,
       instructions: INSTRUCTIONS,
+      // Auth metadata — MCP clients that probe initialize for OAuth
+      // discovery find the public anonymous-OAuth surface here. Auth is
+      // optional; clients can skip the bearer token entirely.
+      auth: {
+        type: "oauth2",
+        required: false,
+        flows: ["authorization_code", "client_credentials"],
+        pkce: "S256",
+        scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+        metadata: {
+          authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
+          protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+          openid_configuration: `${baseUrl}/.well-known/openid-configuration`,
+        },
+        endpoints: {
+          authorize: `${baseUrl}/oauth/authorize`,
+          token: `${baseUrl}/oauth/token`,
+          register: `${baseUrl}/oauth/register`,
+          jwks: `${baseUrl}/oauth/jwks.json`,
+        },
+        publicClientId: "public",
+      },
     });
   }
   if (method === "ping") return jrpcOk(id, {});

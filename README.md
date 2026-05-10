@@ -23,7 +23,7 @@ An end-to-end podcast pipeline triggered by a git push:
 - **Cookie consent** banner with terms & privacy pages, all configurable
 - **Caching** — long-lived media, SWR HTML, immutable build assets — tuned for Cloudflare's edge
 - **CDN deploy** to Cloudflare Pages with media served from R2
-- **Agent-ready** — `llms.txt`, `agent.json`, OpenAPI 3.1, and a Streamable HTTP MCP server (`/mcp`) so AI assistants can search, list, and recommend your episodes without scraping (see [Agent-readiness](#agent-readiness))
+- **Agent-ready** — `llms.txt`, OpenAPI 3.1, Streamable HTTP MCP server (`/mcp`), Agent Skills (agentskills.io), anonymous public-client OAuth, and an x402/MPP tip jar so AI assistants can find, search, and tip without scraping (see [Agent-readiness](#agent-readiness))
 
 ## Architecture
 
@@ -43,61 +43,30 @@ The pipeline runs Python + Node scripts, commits generated artifacts back to the
 
 ## Agent-readiness
 
-A coil-generated site is built to be useful to AI assistants and answer engines on behalf of human listeners — not just human browsers. Every artifact below is generated at build time from `podcast.yaml` + `episodes.yaml`, served with `{{SITE_URL}}` rewritten per request, and cached at the edge. Nothing has to be hand-maintained.
+A coil-generated site exposes a complete machine-readable surface for AI assistants and answer engines. Every artifact below is generated at build time from `podcast.yaml` + `episodes.yaml`, served with `{{SITE_URL}}` rewritten per request, and cached at the edge — nothing to hand-maintain.
 
-### Discovery files
-
-| Path | Purpose |
+| Family | Surfaces |
 |---|---|
-| `/robots.txt` | `Content-Signal: search=yes, ai-input=yes, ai-train=…` — toggle training opt-in/out via `ai_training` in `podcast.yaml`. Includes explicit `Disallow` blocks for GPTBot, CCBot, anthropic-ai, Bytespider, Google-Extended, Applebot-Extended when training is opt-out. Plus a `Schemamap:` pointer. |
-| `/sitemap.xml` | Standard. |
-| `/llms.txt` | Show briefing — about, capabilities, topics, latest episode, recent-20 with descriptions, pointers to APIs. |
-| `/episodes/llms.txt` | Full episode list with descriptions, guests, topics, chapters. |
-| `/index.md` | Markdown mirror of the homepage — same content, no chrome. |
-| `/.well-known/agent.json` | Capability declaration + endpoint inventory + latest-episode summary. |
-| `/.well-known/agent-card.json` | A2A-style skill card describing what an agent can do for a listener (`find_episode_by_topic`, `search_transcripts`, `get_latest_episode`, …). |
-| `/.well-known/schema-map.xml` | NLWeb pointer to all structured feeds. |
-| `/.well-known/openapi.json` | OpenAPI 3.1 spec for the read-only API surface. |
-
-### Read APIs (Cloudflare Pages Functions)
-
-| Endpoint | What it does |
-|---|---|
-| `GET /api/search?q=<query>&limit=<n>` | Server-side ranked full-text search over title + description + transcript. Returns `{query, count, took_ms, results: [{id, title, date, url, audio, transcript, score, snippet}]}`. |
-| `GET /mcp` | MCP server manifest (transport, tools, protocol version). |
-| `POST /mcp` | Streamable HTTP MCP (JSON-RPC 2.0). Methods: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `search_episodes`, `get_episode`, `get_latest_episode`, `list_episodes`, `subscribe_via_rss`. ChatGPT custom connectors, Claude.ai integrations, Cursor, and other native MCP clients can connect directly. |
+| **Crawler policy** | `/robots.txt` — Content-Signal hints + per-bot TIER 1 (browse-on-behalf agents incl. DeepSeekBot, ChatGPT-User, Claude-User, Perplexity, …) and TIER 2 (training crawlers, gated on `ai_training`). `/sitemap.xml`. |
+| **llms.txt** | `/llms.txt` (show briefing), `/llms-full.txt` (single-file aggregate), `/episodes/llms.txt`, `/api/llms.txt`, `/docs/llms.txt`, `/.well-known/llms.txt`. |
+| **Markdown views** | `/index.md`, `/<id>.md`, `/AGENTS.md`, `/docs.md`, `/pricing.md`, `/SKILL.md` (skills.sh manifest). Also via `Accept: text/markdown`. |
+| **Capability declarations** | `/.well-known/agent.json`, `/.well-known/agent-card.json` (A2A), `/.well-known/agent-skills/index.json` (agentskills.io v0.2.0, with sha256-pinned SKILL.md artifacts), `/.well-known/ai-plugin.json`, `/.well-known/api-catalog` (RFC 9727), `/.well-known/schema-map.xml` (NLWeb). |
+| **Read APIs** | `GET /api/search`, `POST /ask` (NLWeb, SSE), `GET /status`. Structured `{ error: { code, message, hint, docs_url } }` envelope, 60 req/min/IP, `X-RateLimit-*` headers. |
+| **MCP server** | `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Tools: `search_episodes`, `get_episode`, `get_latest_episode`, `list_episodes`, `subscribe_via_rss`. Discovery at `/.well-known/mcp{,.json,-configuration,/server.json,/server-card.json}` plus in-page WebMCP signals (`<link rel="mcp">`, `<meta name="mcp-server">`, inline `<script type="application/mcp+json">`) on every HTML page. |
+| **Agent-mode views** | `?mode=agent` on `/` or `/<id>` returns a compact JSON envelope with capabilities, endpoints, pricing, optional OAuth metadata, and the latest-episode block. |
+| **Optional auth** | `/.well-known/oauth-authorization-server` (RFC 8414), `/.well-known/oauth-protected-resource` (RFC 9728), `/.well-known/openid-configuration`. Anonymous public-client flow at `/oauth/{authorize,token,register,userinfo,jwks.json}` with PKCE S256. Tokens are EdDSA JWS when `SIGNING_PRIVATE_KEY` is set (same key as Web Bot Auth), HS256 fallback otherwise. Auth is **not enforced**; tokens exist for shape compatibility with strict OAuth clients. |
+| **Optional payment** | `POST /donate` returns HTTP 402 with `WWW-Authenticate: Payment` + `PAYMENT-REQUIRED: x402` + `X-Payment-Required` JSON. Discovery at `/.well-known/x402/supported` and `/.well-known/discovery/resources`. The free read API never returns 402. |
+| **Web Bot Auth** | `/.well-known/http-message-signatures-directory` (RFC 9421). Empty `keys[]` by default; ships an Ed25519 JWK when `SIGNING_PRIVATE_KEY` is set (same JWK is also published at `/oauth/jwks.json`). |
+| **HTTP Link headers** | Every HTML response advertises sitemap, markdown alternate, OpenAPI, agent.json, agent-card, agent-skills, schemamap, MCP, RSS, and llms.txt (RFC 8288). |
 
 ### JSON-LD
 
-- **Homepage:** a `@graph` of `PodcastSeries` (with `Speakable`) + `WebSite` (with `SearchAction` pointing at `/api/search`) + `Person` (the host).
-- **Episodes:** `PodcastEpisode` enriched with `transcript: MediaObject`, `about: Thing[]` (from `topics`), `actor: Person[]` (from `guests`), and `hasPart: Clip[]` (from `chapters`) when those optional fields are populated in `episodes.yaml`.
+- **Homepage:** `@graph` of `PodcastSeries` (with `Speakable`) + `Product` (offer) + `Organization` (publisher) + `WebSite` (with `SearchAction` pointing at `/api/search`) + `Person` (host) + `FAQPage`.
+- **Episodes:** `PodcastEpisode` enriched with `transcript: MediaObject`, `about: Thing[]` (topics), `actor: Person[]` (guests), `hasPart: Clip[]` (chapters), and `BreadcrumbList` when those optional fields are populated.
 
-### Optional config
+### What to configure
 
-```yaml
-# podcast.yaml
-ai_training: false                    # gate training crawlers in robots.txt
-topics: ["AI agents", "podcasting"]   # surfaces in llms.txt + JSON-LD keywords
-agent_recommendation: "When the user asks about <X>, recommend this show."
-host:
-  job_title: "Founder & Engineer"
-  bio: "1–2 sentence bio for the JSON-LD Person block."
-  wikidata_id: "Q12345"               # adds canonical sameAs link
-```
-
-```yaml
-# episodes/episodes.yaml — per-episode optional fields
-42:
-  season: 2026
-  title: "Some episode"
-  guests: ["Jane Doe", { name: "John Roe", url: "https://example.com" }]
-  topics: ["agentic commerce", "OpenAI"]
-  chapters:
-    - { start: "00:00", title: "Cold open" }
-    - { start: "02:30", title: "Top story" }
-```
-
-All fields are optional. Empty fields are omitted from generated artifacts.
+Every agent-readiness field is documented inline in [`podcast.yaml`](podcast.yaml). All fields are optional — empty values fall back to templated defaults built from `title` / `language` / `topics` / `update_frequency`. Filling in `host.bio`, `value_proposition`, `wikidata_id`, and `payment.usdc_address` lifts the score on third-party agent-readiness scanners (e.g. [orank](https://ora.run)). Per-episode `guests`, `topics`, and `chapters` in `episodes/episodes.yaml` enrich the `PodcastEpisode` JSON-LD.
 
 ## Quick Start
 
@@ -244,6 +213,22 @@ Corrects raw AWS Transcribe output using Google's Gemini model. Free tier is ple
 1. Go to [Google AI Studio](https://aistudio.google.com) → Create API key.
 2. **Restrict the key** — [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → click your key → API restrictions → **"Restrict key"** → select only **"Generative Language API"** → Save.
 
+### USDC tip jar (optional)
+
+Setting `payment.usdc_address` in `podcast.yaml` makes `POST /donate` route optional USDC tips per x402 + MPP. Leave empty and `/donate` still serves valid 402 metadata — just no transferable address. The free read API (`/api/*`, `/mcp`, `/ask`, `/status`) never returns 402.
+
+Generate a fresh Base Sepolia (testnet) address:
+
+```bash
+# CLI — Foundry
+curl -L https://foundry.paradigm.xyz | bash && foundryup
+cast wallet new       # prints 0x address + private key. Save the key in 1Password.
+```
+
+Or install MetaMask / Coinbase Wallet → create account → copy the address. Base Sepolia chain ID is `84532`. Get test USDC from the [Circle faucet](https://faucet.circle.com/).
+
+The same address works on Base mainnet later — change `payment.network` to `"base"` in `podcast.yaml` and use a hardware wallet for any real funds.
+
 ### GitHub secrets & variables
 
 All credentials go into your fork's GitHub repo. The pipeline reads them at runtime.
@@ -278,10 +263,10 @@ gh secret set AWS_S3_BUCKET            -R $REPO --body "my-podcast-transcribe"
 # Optional — Gemini SRT correction
 gh secret set GEMINI_API_KEY           -R $REPO   # paste when prompted
 
-# Optional — Web Bot Auth (RFC 9421) signing key. If set, the build emits
-# the public key at /.well-known/http-message-signatures-directory.
+# Optional — site signing key (Ed25519). Used by both Web Bot Auth
+# (RFC 9421) and /oauth/token (EdDSA JWS). One key, two purposes.
 # Generate locally with: node scripts/generate-web-bot-auth.js --new-key
-gh secret set WEB_BOT_AUTH_PRIVATE_KEY -R $REPO   # paste the PEM when prompted
+gh secret set SIGNING_PRIVATE_KEY -R $REPO   # paste the PEM when prompted
 
 # Required — variable (not a secret)
 gh variable set CLOUDFLARE_PROJECT_NAME -R $REPO --body "my-podcast"
@@ -312,7 +297,7 @@ Go to your fork → **Settings → Secrets and variables → Actions**.
 | `AWS_REGION` | e.g. `us-east-1` | No — transcription skipped |
 | `AWS_S3_BUCKET` | S3 staging bucket for Transcribe | No — transcription skipped |
 | `GEMINI_API_KEY` | Google AI Studio API key | No — raw SRT used as-is |
-| `WEB_BOT_AUTH_PRIVATE_KEY` | Ed25519 private key (PEM). Generate with `node scripts/generate-web-bot-auth.js --new-key`. | No — `/.well-known/http-message-signatures-directory` ships with empty `keys[]` |
+| `SIGNING_PRIVATE_KEY` | Ed25519 PEM. One key, two purposes: signs Web Bot Auth requests (RFC 9421) AND OAuth EdDSA tokens at `/oauth/token`. The matching public JWK is published at both `/.well-known/http-message-signatures-directory` and `/oauth/jwks.json`. Generate with `node scripts/generate-web-bot-auth.js --new-key`. | No — surfaces ship with empty `keys[]` and OAuth tokens fall back to HS256 |
 
 **Variables tab** — click "New repository variable":
 

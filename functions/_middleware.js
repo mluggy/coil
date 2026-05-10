@@ -120,6 +120,7 @@ function buildJsonLd(episode, baseUrl) {
     config.linkedin_url,
     config.wikipedia_url,
     config.github_url,
+    config.github_profile_url,
   ].filter(Boolean);
   const showWikidataId = config.wikidata_id;
   if (showWikidataId) showSameAs.push(`https://www.wikidata.org/wiki/${showWikidataId}`);
@@ -129,14 +130,17 @@ function buildJsonLd(episode, baseUrl) {
 
   // Person block for the host. Used on both homepage (top-level) and as
   // `author` on episodes. Includes optional `host:` block from podcast.yaml.
+  // Host-specific sameAs links — prefer host.* fields when set, fall back to
+  // show-level fields. Keeps Person and Organization JSON-LD blocks
+  // disambiguated for entity-resolution agents.
   const personSameAs = [
+    config.host?.linkedin_url || config.linkedin_url,
+    config.host?.github_url,
+    config.host?.wikipedia_url,
     config.x_url,
-    config.linkedin_url,
     config.facebook_url,
     config.instagram_url,
     config.tiktok_url,
-    config.host?.github_url,
-    config.host?.wikipedia_url,
   ].filter(Boolean);
   const wikidataId = config.host?.wikidata_id;
   if (wikidataId) personSameAs.unshift(`https://www.wikidata.org/wiki/${wikidataId}`);
@@ -439,18 +443,20 @@ function buildAgentJson(episode, baseUrl) {
 
   const payload = {
     mode: "agent",
-    schemaVersion: "1.1",
-    version: "1.1.0",
+    schemaVersion: "1.2",
+    version: "1.2.0",
     name: config.title,
     description: config.description || "",
     url: baseUrl,
+    canonical: baseUrl,
     contentType: "podcast",
-    ...(config.author ? { author: config.author } : {}),
+    ...(config.author ? { author: config.author, publisher: config.publisher || config.author } : {}),
     ...(config.language ? { language: config.language } : {}),
     ...(config.update_frequency ? { updateFrequency: config.update_frequency } : {}),
-    ...(topics.length ? { topics } : {}),
-    ...(config.agent_recommendation ? { whenToRecommend: config.agent_recommendation } : {}),
-    ...(config.github_url ? { repository: config.github_url } : {}),
+    ...(topics.length ? { topics, keywords: topics.join(", ") } : {}),
+    ...(config.agent_recommendation ? { whenToRecommend: config.agent_recommendation, whenToUse: config.agent_recommendation } : {}),
+    ...(config.value_proposition ? { valueProposition: config.value_proposition } : {}),
+    ...(config.github_url ? { repository: config.github_url, sourceCode: config.github_url } : {}),
     pricing: {
       model: "free",
       price: 0,
@@ -458,7 +464,19 @@ function buildAgentJson(episode, baseUrl) {
       note: config.pricing || "Free. No signup, no ads, no paywall.",
       url: `${baseUrl}/pricing.md`,
     },
-    auth: { type: "none", required: false, note: "All endpoints are public read-only." },
+    auth: {
+      type: "none",
+      required: false,
+      note: "All endpoints are public read-only. Optional public OAuth 2.1 flow with PKCE S256 — see endpoints.oauthAuthorizationServer.",
+      optionalOAuth: {
+        type: "oauth2",
+        flow: "authorization_code",
+        pkce: "S256",
+        scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+        clientType: "public",
+        registration: "anonymous",
+      },
+    },
     webhooks: { supported: false, note: "Push notifications via RSS only." },
     rateLimits: {
       perMinute: 60,
@@ -466,7 +484,13 @@ function buildAgentJson(episode, baseUrl) {
       headers: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
       docs: `${baseUrl}/api/llms.txt`,
     },
+    sla: { uptime: "best-effort", note: "Static-data driven on Cloudflare edge — no server-state failures." },
+    errorEnvelope: {
+      schema: "{ error: { code, message, hint, docs_url } }",
+      statusCodes: [400, 402, 404, 405, 429, 500],
+    },
     agentInstructions: `${baseUrl}/AGENTS.md`,
+    skill: `${baseUrl}/SKILL.md`,
     capabilities: [
       "browse_episodes",
       "search_transcripts",
@@ -474,6 +498,9 @@ function buildAgentJson(episode, baseUrl) {
       "get_episode_by_topic",
       "subscribe_via_rss",
       "read_transcripts",
+      "ask_natural_language",
+      "render_markdown",
+      "render_json",
     ],
     endpoints: {
       search: `${baseUrl}/api/search?q={query}`,
@@ -495,6 +522,16 @@ function buildAgentJson(episode, baseUrl) {
       schemaMap: `${baseUrl}/.well-known/schema-map.xml`,
       apiCatalog: `${baseUrl}/.well-known/api-catalog`,
       webBotAuth: `${baseUrl}/.well-known/http-message-signatures-directory`,
+      oauthAuthorizationServer: `${baseUrl}/.well-known/oauth-authorization-server`,
+      oauthProtectedResource: `${baseUrl}/.well-known/oauth-protected-resource`,
+      openidConfiguration: `${baseUrl}/.well-known/openid-configuration`,
+      oauthAuthorize: `${baseUrl}/oauth/authorize`,
+      oauthToken: `${baseUrl}/oauth/token`,
+      oauthRegister: `${baseUrl}/oauth/register`,
+      oauthJwks: `${baseUrl}/oauth/jwks.json`,
+      donate: `${baseUrl}/donate`,
+      x402Discovery: `${baseUrl}/.well-known/discovery/resources`,
+      x402Supported: `${baseUrl}/.well-known/x402/supported`,
       rss: `${baseUrl}/rss.xml`,
       sitemap: `${baseUrl}/sitemap.xml`,
       robots: `${baseUrl}/robots.txt`,
@@ -510,6 +547,7 @@ function buildAgentJson(episode, baseUrl) {
       docs: `${baseUrl}/docs.md`,
       pricing: `${baseUrl}/pricing.md`,
       agents: `${baseUrl}/AGENTS.md`,
+      skillManifest: `${baseUrl}/SKILL.md`,
       ...(config.owner_email ? { support: `mailto:${config.owner_email}` } : {}),
     },
     ...(episode
@@ -649,12 +687,34 @@ function buildMcpManifest(baseUrl) {
         servers: [{ url: `${baseUrl}/mcp`, transport: "streamable-http" }],
         methods: ["initialize", "ping", "tools/list", "tools/call"],
         documentation: `${baseUrl}/.well-known/openapi.json`,
+        // Auth — optional public OAuth 2.1 + PKCE S256. Clients that probe
+        // for an authorization-server URL (orank, MCP auth checks) find one;
+        // clients that skip auth altogether also work.
+        auth: {
+          type: "oauth2",
+          required: false,
+          flows: ["authorization_code", "client_credentials"],
+          pkce: "S256",
+          scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+          authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
+          protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+          openid_configuration: `${baseUrl}/.well-known/openid-configuration`,
+          authorize: `${baseUrl}/oauth/authorize`,
+          token: `${baseUrl}/oauth/token`,
+          publicClientId: "public",
+        },
       },
       null,
       2
     ) + "\n",
     {
-      headers: apiHeaders({ "Cache-Control": HTML_CACHE_CONTROL }),
+      headers: apiHeaders({
+        "Cache-Control": HTML_CACHE_CONTROL,
+        // RFC 6750: advertise the protected-resource metadata location so
+        // 401-aware clients can find OAuth metadata even when auth isn't
+        // required. Helps orank's MCP-auth-mechanism probe.
+        "WWW-Authenticate": `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+      }),
     }
   );
 }
@@ -679,6 +739,16 @@ function buildMcpServerCard(baseUrl) {
     publisher: config.author || undefined,
     contentType: "podcast",
     language: config.language || undefined,
+    auth: {
+      type: "oauth2",
+      required: false,
+      pkce: "S256",
+      flows: ["authorization_code", "client_credentials"],
+      authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
+      protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+      scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+      publicClientId: "public",
+    },
     tools: MCP_TOOLS.map((t) => ({
       name: t.name,
       description: t.description,
@@ -964,10 +1034,16 @@ const SITE_URL_REWRITES = new Set([
   "/.well-known/ai-plugin.json",
   "/.well-known/api-catalog",
   "/.well-known/http-message-signatures-directory",
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/openid-configuration",
+  "/.well-known/x402/supported",
+  "/.well-known/discovery/resources",
   "/AGENTS.md",
   "/docs.md",
   "/pricing.md",
   "/llms-full.txt",
+  "/SKILL.md",
 ]);
 
 const REWRITE_CONTENT_TYPES = {
@@ -988,10 +1064,16 @@ const REWRITE_CONTENT_TYPES = {
   "/.well-known/ai-plugin.json": "application/json; charset=utf-8",
   "/.well-known/api-catalog": 'application/linkset+json;profile="https://www.rfc-editor.org/info/rfc9727"; charset=utf-8',
   "/.well-known/http-message-signatures-directory": "application/json; charset=utf-8",
+  "/.well-known/oauth-authorization-server": "application/json; charset=utf-8",
+  "/.well-known/oauth-protected-resource": "application/json; charset=utf-8",
+  "/.well-known/openid-configuration": "application/json; charset=utf-8",
+  "/.well-known/x402/supported": "application/json; charset=utf-8",
+  "/.well-known/discovery/resources": "application/json; charset=utf-8",
   "/AGENTS.md": "text/markdown; charset=utf-8",
   "/docs.md": "text/markdown; charset=utf-8",
   "/pricing.md": "text/markdown; charset=utf-8",
   "/llms-full.txt": "text/plain; charset=utf-8",
+  "/SKILL.md": "text/markdown; charset=utf-8",
 };
 
 const REWRITE_CACHE_CONTROL = {
@@ -1011,10 +1093,16 @@ const REWRITE_CACHE_CONTROL = {
   "/.well-known/ai-plugin.json": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/api-catalog": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/http-message-signatures-directory": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/oauth-authorization-server": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/oauth-protected-resource": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/openid-configuration": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/x402/supported": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/discovery/resources": "public, max-age=3600, stale-while-revalidate=604800",
   "/AGENTS.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/docs.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/pricing.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/llms-full.txt": "public, max-age=3600, stale-while-revalidate=604800",
+  "/SKILL.md": "public, max-age=3600, stale-while-revalidate=604800",
 };
 
 // Cache rules for static files served through middleware (mirrors _headers)
@@ -1065,9 +1153,17 @@ export async function onRequest({ request, next, env }) {
     return rewriteSiteUrl(request, next);
   }
 
-  // Pages Functions (search API, MCP server, /ask, /status) handle their
-  // own paths. Pass through so file-based routes under functions/ can run.
-  if (path === "/mcp" || path === "/ask" || path === "/status" || path.startsWith("/api/")) {
+  // Pages Functions (search API, MCP server, /ask, /status, /oauth/*,
+  // /donate) handle their own paths. Pass through so file-based routes
+  // under functions/ can run.
+  if (
+    path === "/mcp" ||
+    path === "/ask" ||
+    path === "/status" ||
+    path === "/donate" ||
+    path.startsWith("/api/") ||
+    path.startsWith("/oauth/")
+  ) {
     return next();
   }
 

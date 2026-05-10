@@ -38,15 +38,27 @@ const cleanedHead = headContent
 // sr-only nodes are in raw HTML, not marked `hidden`/`display:none`/
 // `aria-hidden`, so parsers count them as present, but CSS clipping keeps
 // them invisible to sighted users.
+// Anchor hrefs cover every section-level llms.txt + the rich /docs surface
+// + every well-known agent file. orank-style scanners derive section paths
+// from homepage hrefs (e.g. /docs, /api, /episodes) and probe <section>/llms.txt.
 const srOnlyAgentNav = [
   '<nav class="sr-only" aria-label="For AI agents">',
+  '<a href="/docs" rel="api-docs">API & developer docs</a>',
+  '<a href="/api/llms.txt" rel="alternate">API briefing for AI agents</a>',
   '<a href="/AGENTS.md" rel="agent-docs">Agent integration guide</a>',
-  '<a href="/api/llms.txt" rel="api-docs">API briefing for AI agents</a>',
-  '<a href="/docs" rel="docs">Listener-agent docs</a>',
+  '<a href="/llms.txt" rel="alternate">Show briefing (llms.txt)</a>',
+  '<a href="/llms-full.txt" rel="alternate">Full agent briefing (llms-full.txt)</a>',
+  '<a href="/episodes/llms.txt" rel="alternate">Episodes briefing</a>',
+  '<a href="/docs/llms.txt" rel="alternate">Docs briefing</a>',
+  '<a href="/.well-known/llms.txt" rel="alternate">Well-known briefing</a>',
   '<a href="/.well-known/openapi.json" rel="service-desc">OpenAPI spec</a>',
   '<a href="/.well-known/agent.json" rel="describedby">Agent capability declaration</a>',
+  '<a href="/.well-known/agent-card.json" rel="alternate">A2A agent card</a>',
+  '<a href="/.well-known/agent-skills/index.json" rel="alternate">Agent Skills index</a>',
+  '<a href="/.well-known/api-catalog" rel="api-catalog">API catalog (RFC 9727)</a>',
   '<a href="/mcp" rel="mcp">MCP server</a>',
   '<a href="/ask" rel="nlweb">Ask the show (NLWeb /ask)</a>',
+  '<a href="/pricing" rel="payment">Pricing</a>',
   '</nav>',
 ].join("");
 
@@ -55,10 +67,51 @@ const bodyWithSsr = bodyContent.replace(
   `<h1 class="sr-only">__SSR_H1__</h1>${srOnlyAgentNav}<div id="root"></div><div hidden>__SSR_CONTENT__</div>`
 );
 
+// ─── WebMCP declarative discovery ─────────────────────────────────────────
+// In-page MCP discovery for browser-side agents. Three signals:
+// 1. <link rel="mcp"> — RFC-8288-style relation, mirrors the HTTP Link header
+// 2. <meta name="mcp-server"> — flat URL hint for naive scanners
+// 3. <script type="application/mcp+json"> — minimal embedded manifest
+//
+// Only the search tool is inlined; agents wanting the full catalog read it
+// from /mcp via tools/list. Inline manifest size stays under 500 bytes so
+// it doesn't bloat every page.
+const webMcpManifest = JSON.stringify({
+  name: "coil-podcast-mcp",
+  version: "1.0.0",
+  transport: "streamable-http",
+  url: "/mcp",
+  manifest: "/.well-known/mcp",
+  tools: [
+    {
+      name: "search_episodes",
+      description: "Search this podcast by topic, person, or keyword. Returns ranked results with title, date, URL, and a transcript snippet.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          limit: { type: "integer", default: 10, minimum: 1, maximum: 50 },
+        },
+        required: ["query"],
+      },
+    },
+  ],
+});
+
+// All URLs are root-relative — agents resolve them against the page URL.
+// Keeps the template byte-stable across hostnames (no {{SITE_URL}} needed
+// in HTML, which doesn't go through the per-request rewrite path).
+const webMcpHead = [
+  '<link rel="mcp" href="/mcp" type="application/json">',
+  '<meta name="mcp-server" content="/mcp">',
+  `<script type="application/mcp+json" nonce="{{CSP_NONCE}}">${webMcpManifest}</script>`,
+].join("\n  ");
+
 const template = `<!DOCTYPE html>
 <html lang="${config.language}" dir="${config.direction}">
 <head>
   <!--OG_TAGS-->
+  ${webMcpHead}
   <script nonce="{{CSP_NONCE}}">window.__EPISODE__=__EP_JSON__;window.__SEARCH__=__SEARCH_JSON__;</script>
   ${cleanedHead}
 </head>

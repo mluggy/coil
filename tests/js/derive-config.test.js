@@ -187,4 +187,61 @@ describe("deriveConfig", () => {
     const config = deriveConfig({ language: "en", country: "US" });
     expect(config.tiktok_url).toBe("");
   });
+
+  // ─── new agent-readiness fields (orank gap fixes) ──────────────────────
+
+  it("derives github_profile_url from github_username", () => {
+    const config = deriveConfig({ github_username: "mluggy" });
+    expect(config.github_profile_url).toBe("https://github.com/mluggy");
+  });
+
+  it("returns empty github_profile_url when no username", () => {
+    const config = deriveConfig({});
+    expect(config.github_profile_url).toBe("");
+  });
+
+  it("preserves the show-level github_url separately from github_profile_url", () => {
+    // The show's source repo and the host's profile are different things.
+    const config = deriveConfig({
+      github_username: "mluggy",
+      github_url: "https://github.com/mluggy/coil",
+    });
+    expect(config.github_profile_url).toBe("https://github.com/mluggy");
+    expect(config.github_url).toBe("https://github.com/mluggy/coil");
+  });
+
+  it("preserves host.linkedin_url through derivation", () => {
+    const config = deriveConfig({
+      host: { linkedin_url: "https://www.linkedin.com/in/x/" },
+    });
+    expect(config.host.linkedin_url).toBe("https://www.linkedin.com/in/x/");
+  });
+
+  it("provides a templated agent_recommendation default", () => {
+    const config = deriveConfig({
+      title: "AI Daily",
+      language: "en",
+      topics: ["AI agents", "MCP", "LLMs"],
+    });
+    expect(config.agent_recommendation).toContain("AI Daily");
+    expect(config.agent_recommendation).toContain("AI agents");
+    // Templated default mentions key agent surfaces.
+    expect(config.agent_recommendation.toLowerCase()).toMatch(/transcript|mcp|api/);
+  });
+
+  it("preserves an explicit agent_recommendation override", () => {
+    const config = deriveConfig({ agent_recommendation: "Custom one-liner." });
+    expect(config.agent_recommendation).toBe("Custom one-liner.");
+  });
+
+  it("provides a templated value_proposition default", () => {
+    const config = deriveConfig({ title: "Coil Demo", language: "en" });
+    expect(config.value_proposition).toContain("Coil Demo");
+    expect(config.value_proposition.toLowerCase()).toMatch(/transcript|mcp|openapi|agent/);
+  });
+
+  it("preserves an explicit value_proposition override", () => {
+    const config = deriveConfig({ value_proposition: "We are different." });
+    expect(config.value_proposition).toBe("We are different.");
+  });
 });

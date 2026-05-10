@@ -66,4 +66,35 @@ describe("/.well-known/openapi.json", () => {
       expect(spec.components.schemas[name], `missing schema: ${name}`).toBeTruthy();
     }
   });
+
+  it("declares /donate operation with a 402 response", () => {
+    expect(spec.paths["/donate"]).toBeTruthy();
+    const op = spec.paths["/donate"].post;
+    expect(op).toBeTruthy();
+    expect(op.operationId).toBe("donate");
+    expect(op.responses["402"]).toBeTruthy();
+  });
+
+  it("declares x-payment-info on /donate (MPP audit signal)", () => {
+    const ext = spec.paths["/donate"].post["x-payment-info"];
+    expect(ext).toBeTruthy();
+    expect(ext.protocols).toEqual(expect.arrayContaining(["x402", "mpp"]));
+    expect(ext.asset).toBe("USDC");
+    expect(ext.required).toBe(false);
+  });
+
+  it("declares top-level info[x-payment-info] (MPP audit signal at info-block)", () => {
+    const ext = spec.info["x-payment-info"];
+    expect(ext).toBeTruthy();
+    expect(ext.required).toBe(false);
+    expect(ext.protocols).toEqual(expect.arrayContaining(["x402", "mpp"]));
+    expect(ext.endpoint).toMatch(/\/donate$/);
+  });
+
+  it("/donate response advertises Payment headers (x402 + MPP)", () => {
+    const headers = spec.paths["/donate"].post.responses["402"].headers;
+    expect(headers["WWW-Authenticate"]).toBeTruthy();
+    expect(headers["PAYMENT-REQUIRED"]).toBeTruthy();
+    expect(headers["X-Payment-Required"]).toBeTruthy();
+  });
 });

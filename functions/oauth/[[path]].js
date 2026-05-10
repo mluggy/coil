@@ -1,8 +1,8 @@
 // Anonymous public-client OAuth 2.1 endpoints. There are no real users;
 // every request is granted automatically. Tokens are EdDSA JWS (Ed25519)
-// when SIGNING_PRIVATE_KEY (or back-compat WEB_BOT_AUTH_PRIVATE_KEY) is
-// set, HS256 JWS otherwise. Auth is *not* enforced server side — every
-// API endpoint accepts unauthenticated requests too.
+// when SIGNING_PRIVATE_KEY is set, HS256 JWS otherwise. Auth is *not*
+// enforced server side — every API endpoint accepts unauthenticated
+// requests too.
 //
 // This exists to satisfy three orank checks at zero ongoing cost:
 //   - OAuth 2.0 support (well-known + working /token + /authorize)
@@ -93,9 +93,7 @@ function pemToPkcs8Bytes(pem) {
 }
 
 async function loadSigningKey(env) {
-  // Prefer the canonical name; fall back to the legacy name for forks
-  // that set WEB_BOT_AUTH_PRIVATE_KEY pre-1.3.0.
-  const pem = env?.SIGNING_PRIVATE_KEY || env?.WEB_BOT_AUTH_PRIVATE_KEY;
+  const pem = env?.SIGNING_PRIVATE_KEY;
   if (!pem || !pem.trim()) {
     return { kind: "hs256", secret: FALLBACK_HS256_SECRET };
   }

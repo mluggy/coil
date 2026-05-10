@@ -1,25 +1,27 @@
-// Generates /.well-known/http-message-signatures-directory per
-// the Web Bot Auth proposal (RFC 9421 + 9421bis):
+// Site-wide Ed25519 signing key — generation utility + build-time
+// publisher of the Web Bot Auth public JWKS.
 //
-//   { "keys": [{ kty, crv, kid, x, nbf, exp }, ...] }
+// One key, two purposes:
+//   - Web Bot Auth (RFC 9421 + 9421bis): the public JWK is baked into
+//     /.well-known/http-message-signatures-directory at build time.
+//   - OAuth: /oauth/token signs EdDSA JWS access tokens with the same
+//     key at runtime (see functions/oauth/[[path]].js); /oauth/jwks.json
+//     publishes the same public JWK.
 //
-// Reads the private key from `SIGNING_PRIVATE_KEY` (preferred) or
-// `WEB_BOT_AUTH_PRIVATE_KEY` (back-compat, pre-1.3.0 forks). The same
-// key is used at runtime by `/oauth/token` to sign EdDSA JWS access
-// tokens — see functions/oauth/[[path]].js. One key, two purposes.
-//
-// If SIGNING_PRIVATE_KEY env var is set (Ed25519 PEM), derives the
-// public key, computes a JWK Thumbprint (RFC 7638) for `kid`, and emits
-// a JWKS pointing at it. If unset, emits an empty `{ "keys": [] }`
-// document (still valid JSON, scores partial credit).
+// Reads the private key from SIGNING_PRIVATE_KEY (Ed25519 PEM). When
+// set, derives the public key, computes a JWK Thumbprint (RFC 7638)
+// for `kid`, and emits a JWKS pointing at it. When unset, emits an
+// empty `{ "keys": [] }` document (still valid JSON, scores partial
+// credit; OAuth tokens fall back to HS256 at runtime).
 //
 // Generate a fresh keypair locally with:
-//   node scripts/generate-web-bot-auth.js --new-key
+//   node scripts/generate-signing-key.js --new-key
 //
-// Then paste the printed PEM into your repo's GitHub Actions secret
-// named SIGNING_PRIVATE_KEY. CI passes it through to the build step
-// AND to the deployed Cloudflare Pages environment so /oauth/token
-// can sign with the same key.
+// Then paste the printed PEM into:
+//   1. GitHub Actions secret named SIGNING_PRIVATE_KEY (so CI bakes
+//      the public JWK into the static well-known file).
+//   2. Cloudflare Pages env var named SIGNING_PRIVATE_KEY (so the
+//      runtime function can sign tokens).
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "crypto";
 import { mkdirSync, writeFileSync } from "fs";

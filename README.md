@@ -265,7 +265,7 @@ gh secret set GEMINI_API_KEY           -R $REPO   # paste when prompted
 
 # Optional — site signing key (Ed25519). Used by both Web Bot Auth
 # (RFC 9421) and /oauth/token (EdDSA JWS). One key, two purposes.
-# Generate locally with: node scripts/generate-web-bot-auth.js --new-key
+# Generate locally with: node scripts/generate-signing-key.js --new-key
 gh secret set SIGNING_PRIVATE_KEY -R $REPO   # paste the PEM when prompted
 
 # Required — variable (not a secret)
@@ -297,7 +297,7 @@ Go to your fork → **Settings → Secrets and variables → Actions**.
 | `AWS_REGION` | e.g. `us-east-1` | No — transcription skipped |
 | `AWS_S3_BUCKET` | S3 staging bucket for Transcribe | No — transcription skipped |
 | `GEMINI_API_KEY` | Google AI Studio API key | No — raw SRT used as-is |
-| `SIGNING_PRIVATE_KEY` | Ed25519 PEM. One key, two purposes: signs Web Bot Auth requests (RFC 9421) AND OAuth EdDSA tokens at `/oauth/token`. The matching public JWK is published at both `/.well-known/http-message-signatures-directory` and `/oauth/jwks.json`. Generate with `node scripts/generate-web-bot-auth.js --new-key`. | No — surfaces ship with empty `keys[]` and OAuth tokens fall back to HS256 |
+| `SIGNING_PRIVATE_KEY` | Ed25519 PEM. One key, two purposes: signs Web Bot Auth requests (RFC 9421) AND OAuth EdDSA tokens at `/oauth/token`. The matching public JWK is published at both `/.well-known/http-message-signatures-directory` and `/oauth/jwks.json`. Generate with `node scripts/generate-signing-key.js --new-key`. | No — surfaces ship with empty `keys[]` and OAuth tokens fall back to HS256 |
 
 **Variables tab** — click "New repository variable":
 

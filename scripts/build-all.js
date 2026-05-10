@@ -20,7 +20,7 @@ const steps = [
   { label: "generate-docs", cmd: "node scripts/generate-docs.js" },
   { label: "generate-agent-files", cmd: "node scripts/generate-agent-files.js" },
   { label: "generate-agent-skills", cmd: "node scripts/generate-agent-skills.js" },
-  { label: "generate-web-bot-auth", cmd: "node scripts/generate-web-bot-auth.js" },
+  { label: "generate-signing-key", cmd: "node scripts/generate-signing-key.js" },
   { label: "generate-oauth", cmd: "node scripts/generate-oauth.js" },
   { label: "generate-openapi", cmd: "node scripts/generate-openapi.js" },
   { label: "vite build", cmd: "npx vite build" },

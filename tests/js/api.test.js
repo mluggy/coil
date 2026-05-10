@@ -113,3 +113,54 @@ describe("/api/* catchall (unknown paths)", () => {
     expect(resp.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
 });
+
+describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", () => {
+  it("returns HTTP 402 (no versioned API exists; pointers go to /donate)", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    expect(resp.status).toBe(402);
+  });
+
+  it("emits x402 PAYMENT-REQUIRED + WWW-Authenticate: Payment headers", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    expect(resp.headers.get("PAYMENT-REQUIRED")).toBe("x402");
+    const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
+    expect(wwwAuth).toMatch(/^Payment\b/);
+    expect(wwwAuth).toMatch(/asset="USDC"/);
+  });
+
+  it("emits machine-readable X-Payment-Required (parseable JSON)", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    const parsed = JSON.parse(resp.headers.get("X-Payment-Required"));
+    expect(parsed.x402Version).toBe(1);
+    expect(parsed.accepts[0].asset).toBe("USDC");
+    expect(parsed.accepts[0].resource).toMatch(/\/donate$/);
+  });
+
+  it("emits Link rel=payment header pointing at /donate", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    const link = resp.headers.get("Link") || "";
+    expect(link).toMatch(/\/donate>;\s*rel="payment"/);
+    expect(link).toMatch(/rel="x402"/);
+  });
+
+  it("body folds x402 + MPP payment methods alongside the structured error", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    const body = await json(resp);
+    expect(body.error.code).toBe("no_versioned_api");
+    const types = body.paymentMethods.map((m) => m.type);
+    expect(types).toContain("x402");
+    expect(types).toContain("mpp");
+  });
+
+  it("nested paths under /api/v1 also return 402", async () => {
+    const resp = await catchallGet({ request: req("/api/v1/users/me") });
+    expect(resp.status).toBe(402);
+  });
+
+  it("paths NOT starting with /api/v1 still return 404", async () => {
+    const resp = await catchallGet({ request: req("/api/v2") });
+    expect(resp.status).toBe(404);
+    const resp2 = await catchallGet({ request: req("/api/foo") });
+    expect(resp2.status).toBe(404);
+  });
+});

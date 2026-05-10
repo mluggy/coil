@@ -114,6 +114,25 @@ User Experience
 New optional GitHub secret
 - `WEB_BOT_AUTH_PRIVATE_KEY` — Ed25519 PEM. Optional. When set, the build emits the public key as a JWK at `/.well-known/http-message-signatures-directory`.
 
+## 1.3.1 — 2026-05-10
+
+Follow-up patch to 1.3.0.
+
+### Fixed
+- CI: workflow now passes `SIGNING_PRIVATE_KEY` to the build step. 1.3.0 renamed the secret in the generator script but missed the workflow file, so forks setting the new secret name saw `/.well-known/http-message-signatures-directory` ship empty `keys[]` even when configured.
+
+### Changed
+- WebMCP — added the canonical imperative API (`navigator.modelContext.registerTool(…)`) on every HTML page alongside the existing declarative `<link rel="mcp">`, `<meta name="mcp-server">`, and `<script type="application/mcp+json">` signals. The imperative path is what most current WebMCP audits actually test for. The handler invokes `/api/search` via `fetch` and returns the standard JSON envelope.
+- HTTP `Link` header now advertises `<…/donate>; rel="payment"` and `<…/.well-known/x402/supported>; rel="x402"`, plus declarative `<link rel="payment">` and `<meta name="x402-resource">` in HTML — payment-aware audits find `/donate` without needing the free read API to return 402.
+- `/api/v1*` (and any path under it) now returns HTTP 402 with x402 + MPP headers and a structured envelope pointing at `/donate`. Coil never implemented a versioned API; `/api/v1` is a common probe path for paid APIs, so returning 402 there gives x402/MPP audits a payment surface without making any working endpoint pretend to be paid. Real consumers don't hit `/api/v1`.
+- OpenAPI spec — `/donate` is now a documented operation with an `x-payment-info` extension (per-operation and at the top-level `info` block), declaring scheme/asset/network/address/protocols. Documents the 402 response with `WWW-Authenticate: Payment`, `PAYMENT-REQUIRED: x402`, and `X-Payment-Required` headers.
+
+### Removed
+- `WEB_BOT_AUTH_PRIVATE_KEY` back-compat fallback in the signing-key script, `functions/oauth/[[path]].js`, the workflow env, and the related test. `SIGNING_PRIVATE_KEY` is now the only recognized name.
+
+### Renamed
+- `scripts/generate-web-bot-auth.js` → `scripts/generate-signing-key.js`. The script's role broadened in 1.3.0 (Web Bot Auth + OAuth share one key); the new name reflects that.
+
 ## 1.3.0 — 2026-05-10
 
 Closes orank Discovery, Identity, and Auth & Access gaps. Adds an optional public-client OAuth surface, an x402/MPP tip jar, and a 158-test agent-readiness suite (was 52).
@@ -158,7 +177,7 @@ For an existing fork upgrading to 1.3.0:
    - `github_username` — auto-builds the GitHub profile URL into JSON-LD `sameAs`.
    - `host.bio`, `host.job_title`, `host.linkedin_url`, `host.github_url`, `host.wikipedia_url` — for E-E-A-T scoring.
    - `payment` block — fill `payment.usdc_address` to make `/donate` route a real USDC tip; leave empty to keep `/donate` responding with valid 402 metadata but no transferable address.
-3. Optional — generate a signing key with `node scripts/generate-web-bot-auth.js --new-key` and set `SIGNING_PRIVATE_KEY` as a Cloudflare Pages env var (also as a GitHub secret if you want CI to publish the public JWK). One key powers both Web Bot Auth (`/.well-known/http-message-signatures-directory`) and OAuth EdDSA tokens (`/oauth/token` + `/oauth/jwks.json`). Skip for typical deployments — both surfaces work with empty / fallback defaults.
+3. Optional — generate a signing key with `node scripts/generate-signing-key.js --new-key` (renamed from `generate-web-bot-auth.js` in 1.3.1) and set `SIGNING_PRIVATE_KEY` as a Cloudflare Pages env var (also as a GitHub secret if you want CI to publish the public JWK). One key powers both Web Bot Auth (`/.well-known/http-message-signatures-directory`) and OAuth EdDSA tokens (`/oauth/token` + `/oauth/jwks.json`). Skip for typical deployments — both surfaces work with empty / fallback defaults.
 4. `npm run build && npm test` (220 tests must pass).
 5. Deploy. After the first deploy, run `npx skills add https://<your-domain>/SKILL.md` to register on skills.sh.
 

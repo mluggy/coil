@@ -275,25 +275,6 @@ describe("EdDSA signing (SIGNING_PRIVATE_KEY set)", () => {
     expect(tokenKid).toBe(jwksKid);
   });
 
-  it("falls back to WEB_BOT_AUTH_PRIVATE_KEY for back-compat (pre-1.3.0 forks)", async () => {
-    const resp = await call(
-      "/oauth/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "grant_type=client_credentials",
-      },
-      { WEB_BOT_AUTH_PRIVATE_KEY: pem }
-    );
-    expect(resp.status).toBe(200);
-    const { access_token } = await json(resp);
-    const headerB64 = access_token.split(".")[0];
-    const padded =
-      headerB64.replace(/-/g, "+").replace(/_/g, "/") +
-      "==".slice(0, (4 - (headerB64.length % 4)) % 4);
-    expect(JSON.parse(atob(padded)).alg).toBe("EdDSA");
-  });
-
   it("falls back to HS256 when key is invalid PEM (no 500)", async () => {
     const resp = await call(
       "/oauth/token",

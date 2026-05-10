@@ -115,15 +115,12 @@ jobs:
       - name: Build website
         env:
           # Optional Ed25519 PEM. One key, two purposes:
-          #   - scripts/generate-web-bot-auth.js bakes the public key into
+          #   - scripts/generate-signing-key.js bakes the public key into
           #     /.well-known/http-message-signatures-directory at build time.
           #   - functions/oauth/[[path]].js signs EdDSA JWS tokens at
           #     /oauth/token (also publishing the same JWK at /oauth/jwks.json).
-          # Pre-1.3.0 forks may have set WEB_BOT_AUTH_PRIVATE_KEY instead;
-          # both names are passed for back-compat. Generate a fresh key with
-          # `node scripts/generate-web-bot-auth.js --new-key`.
+          # Generate a fresh key with `node scripts/generate-signing-key.js --new-key`.
           SIGNING_PRIVATE_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
-          WEB_BOT_AUTH_PRIVATE_KEY: ${{ secrets.WEB_BOT_AUTH_PRIVATE_KEY }}
         run: npm run build
 
       # ─── Deploy ─────────────────────────────────────────────

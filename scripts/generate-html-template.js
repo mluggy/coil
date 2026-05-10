@@ -101,10 +101,56 @@ const webMcpManifest = JSON.stringify({
 // All URLs are root-relative — agents resolve them against the page URL.
 // Keeps the template byte-stable across hostnames (no {{SITE_URL}} needed
 // in HTML, which doesn't go through the per-request rewrite path).
+//
+// Three WebMCP signals + one imperative registration:
+//   1. <link rel="mcp">      — RFC-8288-style relation
+//   2. <meta name="mcp-server"> — flat URL hint
+//   3. <script type="application/mcp+json"> — embedded manifest
+//   4. <script>navigator.modelContext.registerTool(…)</script>
+//      — the canonical imperative WebMCP API. Browser-side agents pick
+//      up the tool from the runtime registry. The invoke handler calls
+//      our /api/search endpoint via fetch and returns the JSON envelope.
+const webMcpImperative = `<script nonce="{{CSP_NONCE}}">
+(function(){
+  if (typeof navigator === "undefined" || !navigator.modelContext) return;
+  navigator.modelContext.registerTool({
+    name: "search_episodes",
+    description: "Search this podcast by topic, person, or keyword. Returns ranked results with title, date, URL, and a transcript snippet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query (free text)." },
+        limit: { type: "integer", default: 10, minimum: 1, maximum: 50 }
+      },
+      required: ["query"]
+    },
+    invoke: async function(input) {
+      var url = new URL("/api/search", location.origin);
+      url.searchParams.set("q", input.query);
+      if (input.limit) url.searchParams.set("limit", String(input.limit));
+      var r = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("search_episodes failed: HTTP " + r.status);
+      return await r.json();
+    }
+  });
+})();
+</script>`;
+
+// x402 / payment discovery — declarative hints so audits looking for a
+// payment surface find /donate without us having to make the free read
+// API return 402 itself.
+const paymentHead = [
+  '<link rel="payment" href="/donate" type="application/json">',
+  '<meta name="x402-resource" content="/donate">',
+  '<meta name="payment-resource" content="/donate">',
+].join("\n  ");
+
 const webMcpHead = [
   '<link rel="mcp" href="/mcp" type="application/json">',
   '<meta name="mcp-server" content="/mcp">',
   `<script type="application/mcp+json" nonce="{{CSP_NONCE}}">${webMcpManifest}</script>`,
+  webMcpImperative,
+  paymentHead,
 ].join("\n  ");
 
 const template = `<!DOCTYPE html>

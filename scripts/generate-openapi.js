@@ -48,6 +48,22 @@ const spec = {
       headers: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
       docs: `${SITE}/api/llms.txt`,
     },
+    // Top-level x-payment-info — audits that probe info-block payment
+    // metadata find the (voluntary) tip-jar surface here. The free read
+    // API never charges; only POST /donate returns HTTP 402.
+    "x-payment-info": {
+      required: false,
+      protocols: ["x402", "mpp"],
+      scheme: "stablecoin",
+      asset: "USDC",
+      network: config.payment?.network || "base-sepolia",
+      address: config.payment?.usdc_address || "",
+      minAmount: config.payment?.min_amount || "0.01",
+      suggestedAmount: config.payment?.suggested_amount || "1.00",
+      endpoint: `${SITE}/donate`,
+      facilitator: `${SITE}/.well-known/x402/supported`,
+      discovery: `${SITE}/.well-known/discovery/resources`,
+    },
   },
   servers: [{ url: SITE }],
   paths: {
@@ -149,6 +165,76 @@ const spec = {
             content: { "application/json": { schema: { $ref: "#/components/schemas/StatusResponse" } } },
           },
           ...errorResponses,
+        },
+      },
+    },
+    "/donate": {
+      post: {
+        summary: "Optional USDC tip jar (x402 + MPP)",
+        description:
+          "Voluntary tip endpoint. Always returns HTTP 402 with x402 + MPP " +
+          "payment-discovery headers. The free read API never returns 402; " +
+          "only this endpoint does. Payment-aware agents (Coinbase x402, MPP-" +
+          "enabled clients) can route a USDC tip on Base Sepolia testnet by " +
+          "default (configurable via `payment` in podcast.yaml).",
+        operationId: "donate",
+        "x-payment-info": {
+          protocols: ["x402", "mpp"],
+          scheme: "stablecoin",
+          asset: "USDC",
+          network: config.payment?.network || "base-sepolia",
+          address: config.payment?.usdc_address || "",
+          minAmount: config.payment?.min_amount || "0.01",
+          suggestedAmount: config.payment?.suggested_amount || "1.00",
+          currency: "USD",
+          required: false,
+          facilitator: `${SITE}/.well-known/x402/supported`,
+          discovery: `${SITE}/.well-known/discovery/resources`,
+        },
+        responses: {
+          "402": {
+            description: "Payment Required (always — voluntary tip jar).",
+            headers: {
+              "WWW-Authenticate": {
+                description: "RFC 7235 challenge with Payment scheme.",
+                schema: { type: "string", example: "Payment realm=\"…/donate\", network=\"base-sepolia\", asset=\"USDC\"" },
+              },
+              "PAYMENT-REQUIRED": {
+                description: "x402 protocol identifier.",
+                schema: { type: "string", example: "x402" },
+              },
+              "X-Payment-Required": {
+                description: "JSON-encoded x402 paymentRequirements.",
+                schema: { type: "string" },
+              },
+              Link: {
+                description: "RFC 8288 — rel=payment + rel=x402-supported.",
+                schema: { type: "string" },
+              },
+            },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["title", "paymentMethods"],
+                  properties: {
+                    title: { type: "string" },
+                    description: { type: "string" },
+                    paymentMethods: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          type: { type: "string", enum: ["x402", "mpp", "external"] },
+                        },
+                      },
+                    },
+                    docs: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },

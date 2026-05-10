@@ -69,6 +69,9 @@ describe("homepage HTML", () => {
     expect(link).toMatch(/openapi\.json>;\s*rel="service-desc"/);
     expect(link).toMatch(/rel="mcp"/);
     expect(link).toMatch(/index\.md>;\s*rel="alternate";\s*type="text\/markdown"/);
+    // Payment + x402 discovery in HTTP Link header
+    expect(link).toMatch(/\/donate>;\s*rel="payment"/);
+    expect(link).toMatch(/rel="x402"/);
   });
 
   it("emits security headers (CSP, X-Frame-Options, etc.)", async () => {

@@ -61,4 +61,22 @@ describe("WebMCP discovery in homepage HTML template", () => {
     expect(tool.inputSchema.properties.query.type).toBe("string");
     expect(tool.inputSchema.properties.limit.type).toBe("integer");
   });
+
+  it("registers the search_episodes tool via navigator.modelContext (imperative WebMCP API)", () => {
+    // Audits look for the canonical browser-side imperative API, not just
+    // declarative discovery. The script must call registerTool with a
+    // typed inputSchema so the tool is callable from a browser-side
+    // agent without further introspection.
+    expect(html).toMatch(/navigator\.modelContext/);
+    expect(html).toMatch(/registerTool\s*\(/);
+    expect(html).toMatch(/name:\s*"search_episodes"/);
+    expect(html).toMatch(/invoke:\s*async\s+function/);
+    // Guarded so pages running in a non-WebMCP browser don't error.
+    expect(html).toMatch(/!navigator\.modelContext/);
+  });
+
+  it("declares <link rel=\"payment\"> + x402-resource meta for /donate", () => {
+    expect(html).toMatch(/<link rel="payment" href="\/donate"[^>]*>/);
+    expect(html).toMatch(/<meta name="x402-resource" content="\/donate">/);
+  });
 });

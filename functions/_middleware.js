@@ -778,6 +778,10 @@ function linkHeader(baseUrl, episode) {
     `<${baseUrl}/mcp>; rel="mcp"; type="application/json"`,
     `<${baseUrl}/.well-known/mcp>; rel="mcp"; type="application/json"`,
     `<${baseUrl}/rss.xml>; rel="alternate"; type="application/rss+xml"`,
+    // Payment surface — points x402/MPP-aware audits at /donate, which
+    // returns the actual HTTP 402. The free read API never returns 402.
+    `<${baseUrl}/donate>; rel="payment"; type="application/json"`,
+    `<${baseUrl}/.well-known/x402/supported>; rel="x402"; type="application/json"`,
   ];
   return links.join(", ");
 }

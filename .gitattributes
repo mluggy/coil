@@ -16,10 +16,10 @@
 
 podcast.yaml                   merge=ours
 episodes/episodes.yaml         merge=ours
-episodes/*.mp3                 merge=ours
-episodes/*.srt                 merge=ours
-episodes/*.txt                 merge=ours
-episodes/*.png                 merge=ours
+episodes/s1e1.mp3              merge=ours
+episodes/s1e1.srt              merge=ours
+episodes/s1e1.txt              merge=ours
+episodes/s1e1.png              merge=ours
 public/cover.png               merge=ours
 episodes/rss.xml               merge=ours
 wrangler.toml                  merge=ours

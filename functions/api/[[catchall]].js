@@ -23,7 +23,12 @@ function paymentRequiredResponse({ request }) {
   const asset = cfg.asset || DEFAULT_ASSET;
   const oneUsdc = 1_000_000;
   const recommended = parseFloat(cfg.suggested_amount || "1.00");
-  const requirements = {
+
+  // x402-spec body: top-level x402Version + accepts + error are required
+  // for canonical x402 detection. Audit parsers fail if these aren't on
+  // the root object. The structured error envelope and MPP alternative
+  // ride alongside in `_meta` so we don't lose any information.
+  const body = {
     x402Version: 1,
     accepts: [
       {
@@ -39,37 +44,36 @@ function paymentRequiredResponse({ request }) {
       },
     ],
     error: "payment_required",
-  };
-
-  const body = {
-    error: {
+    _meta: {
       code: "no_versioned_api",
       message: `No versioned API at ${url.pathname}. The free read endpoints are unversioned.`,
       hint: `${baseUrl}/api/llms.txt — full list of supported endpoints. ${baseUrl}/donate — voluntary USDC tip jar.`,
       docs_url: `${baseUrl}/api/llms.txt`,
-    },
-    paymentMethods: [
-      { type: "x402", version: "0.4", ...requirements.accepts[0] },
-      {
+      alternativePayment: {
         type: "mpp",
         scheme: "stablecoin",
         asset,
         network,
         address,
-        amount: String(recommended.toFixed(2)),
+        amount: recommended.toFixed(2),
         currency: "USD",
         memo: `Tip for ${config.title || "podcast"}`,
       },
-    ],
+    },
   };
 
-  const headers = apiHeaders({
+  // Build headers manually so we can emit two WWW-Authenticate values:
+  // one with scheme "x402" (canonical x402 audits) and one with scheme
+  // "Payment" (MPP audits). RFC 9110 allows multiple challenge values.
+  const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
-    "WWW-Authenticate": `Payment realm="${baseUrl}/donate", network="${network}", asset="${asset}"`,
     "PAYMENT-REQUIRED": "x402",
-    "X-Payment-Required": JSON.stringify(requirements),
+    "X-Payment-Required": JSON.stringify({ x402Version: body.x402Version, accepts: body.accepts, error: body.error }),
     "Link": `<${baseUrl}/donate>; rel="payment"; type="application/json", <${baseUrl}/.well-known/x402/supported>; rel="x402"; type="application/json"`,
-  });
+  }));
+  headers.append("WWW-Authenticate", `x402 realm="${baseUrl}/donate", network="${network}", asset="${asset}"`);
+  headers.append("WWW-Authenticate", `Payment realm="${baseUrl}/donate", network="${network}", asset="${asset}"`);
+
   return new Response(JSON.stringify(body, null, 2), { status: 402, headers });
 }
 

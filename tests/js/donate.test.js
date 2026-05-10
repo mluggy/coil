@@ -22,10 +22,12 @@ describe("POST /donate", () => {
     expect(resp.headers.get("PAYMENT-REQUIRED")).toBe("x402");
   });
 
-  it("emits WWW-Authenticate: Payment with realm + asset + network", async () => {
+  it("emits WWW-Authenticate with both x402 and Payment schemes", async () => {
     const resp = await call({ method: "POST" });
     const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
-    expect(wwwAuth).toMatch(/^Payment\b/);
+    // Both schemes present (multiple challenges joined with comma per RFC 9110).
+    expect(wwwAuth).toMatch(/\bx402\b/);
+    expect(wwwAuth).toMatch(/\bPayment\b/);
     expect(wwwAuth).toMatch(/realm="[^"]+\/donate"/);
     expect(wwwAuth).toMatch(/asset="USDC"/);
     expect(wwwAuth).toMatch(/network="[^"]+"/);
@@ -53,16 +55,25 @@ describe("POST /donate", () => {
     expect(link).toMatch(/rel="x402-supported"/);
   });
 
-  it("body folds x402, MPP, and an external donation link", async () => {
+  it("body is x402-spec compliant (x402Version + accepts + error at top level)", async () => {
     const resp = await call({ method: "POST" });
     const body = JSON.parse(await resp.text());
-    expect(body.title).toBeTruthy();
-    expect(body.description).toBeTruthy();
-    const types = body.paymentMethods.map((m) => m.type);
-    expect(types).toContain("x402");
+    expect(body.x402Version).toBe(1);
+    expect(Array.isArray(body.accepts)).toBe(true);
+    expect(body.accepts[0].asset).toBe("USDC");
+    expect(body.accepts[0].scheme).toBe("exact");
+    expect(body.error).toBe("payment_required");
+  });
+
+  it("body's _meta carries MPP + external donation alternatives", async () => {
+    const resp = await call({ method: "POST" });
+    const body = JSON.parse(await resp.text());
+    expect(body._meta.title).toBeTruthy();
+    expect(body._meta.description).toBeTruthy();
+    const types = body._meta.alternativePayments.map((m) => m.type);
     expect(types).toContain("mpp");
     expect(types).toContain("external");
-    const mpp = body.paymentMethods.find((m) => m.type === "mpp");
+    const mpp = body._meta.alternativePayments.find((m) => m.type === "mpp");
     expect(mpp.asset).toBe("USDC");
     expect(mpp.scheme).toBe("stablecoin");
   });

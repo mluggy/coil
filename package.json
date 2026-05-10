@@ -1,6 +1,6 @@
 {
   "name": "coil",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Self-hosted podcast platform. Drop a WAV, push, get a podcast.",
   "type": "module",
   "private": true,

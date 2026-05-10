@@ -114,6 +114,15 @@ User Experience
 New optional GitHub secret
 - `WEB_BOT_AUTH_PRIVATE_KEY` — Ed25519 PEM. Optional. When set, the build emits the public key as a JWK at `/.well-known/http-message-signatures-directory`.
 
+## 1.3.2 — 2026-05-10
+
+x402 spec-compliance fix.
+
+### Fixed
+- `/api/v1` and `/donate` 402 responses now match the canonical x402 v0.4 wire format that audits parse for. Two changes:
+  1. **Body shape:** `x402Version` + `accepts` + `error` are now at the **top level** of the JSON body (audits read these from the root object). The structured error envelope and MPP / external donation alternatives moved into `_meta` so no information is lost.
+  2. **`WWW-Authenticate`:** emits two challenge values (RFC 9110 §11.6.1) — one with scheme `x402` for x402 audits, one with scheme `Payment` for MPP audits. Previously only `Payment` was sent, which x402 audits rejected as "no valid x402 payment headers".
+
 ## 1.3.1 — 2026-05-10
 
 Follow-up patch to 1.3.0.

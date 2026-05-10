@@ -72,49 +72,52 @@ export async function onRequest({ request }) {
   const info = paymentInfo(baseUrl);
   const requirements = x402PaymentRequirements(baseUrl, info);
 
-  // Body — both x402 and MPP shapes folded into one envelope so any
-  // payment-aware agent finds something parseable.
+  // Body — canonical x402 paymentRequirements at the top level (audits
+  // look for x402Version + accepts on the root object). MPP and external
+  // donation alternatives ride alongside in `_meta` so we don't lose any
+  // information.
   const body = {
-    title: `Tip ${config.title || "this podcast"}`,
-    description: info.note,
-    paymentMethods: [
-      {
-        type: "x402",
-        version: "0.4",
-        ...requirements.accepts[0],
-      },
-      {
-        // Machine Payment Protocol — uses the same USDC asset/network but
-        // declares it as MPP-compatible so MPP-only clients also see it.
-        type: "mpp",
-        scheme: "stablecoin",
-        asset: info.asset,
-        network: info.network,
-        address: info.address,
-        amount: info.recommendedAmount,
-        currency: "USD",
-        memo: `Tip for ${config.title || "podcast"}`,
-      },
-      {
-        // Fallback: a hosted donation link from podcast.yaml (e.g.
-        // GitHub Sponsors). Payment-naive agents can show the user a link.
-        type: "external",
-        href: config.funding_url || `${baseUrl}/pricing.md`,
-        label: config.labels?.funding || "Support this podcast",
-      },
-    ],
-    docs: info.docsUrl,
+    x402Version: requirements.x402Version,
+    accepts: requirements.accepts,
+    error: requirements.error,
+    _meta: {
+      title: `Tip ${config.title || "this podcast"}`,
+      description: info.note,
+      docs: info.docsUrl,
+      alternativePayments: [
+        {
+          // Machine Payment Protocol — same stablecoin rail; advertised
+          // explicitly so MPP-only clients see it.
+          type: "mpp",
+          scheme: "stablecoin",
+          asset: info.asset,
+          network: info.network,
+          address: info.address,
+          amount: info.recommendedAmount,
+          currency: "USD",
+          memo: `Tip for ${config.title || "podcast"}`,
+        },
+        {
+          // Hosted donation fallback (e.g. GitHub Sponsors).
+          type: "external",
+          href: config.funding_url || `${baseUrl}/pricing.md`,
+          label: config.labels?.funding || "Support this podcast",
+        },
+      ],
+    },
   };
 
-  // Headers — x402 PAYMENT-REQUIRED + MPP WWW-Authenticate: Payment + a
-  // standards-friendly Link header for OpenAPI consumers.
-  const headers = apiHeaders({
+  // Headers — emit two WWW-Authenticate values: scheme "x402" for x402
+  // audits and scheme "Payment" for MPP audits. RFC 9110 allows multiple
+  // challenges; we use Headers.append to send each as a distinct value.
+  const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
-    "WWW-Authenticate": `Payment realm="${baseUrl}/donate", network="${info.network}", asset="${info.asset}"`,
     "PAYMENT-REQUIRED": "x402",
     "X-Payment-Required": JSON.stringify(requirements),
     "Link": `<${info.docsUrl}>; rel="payment"; type="text/markdown", <${baseUrl}/.well-known/x402/supported>; rel="x402-supported"; type="application/json"`,
-  });
+  }));
+  headers.append("WWW-Authenticate", `x402 realm="${baseUrl}/donate", network="${info.network}", asset="${info.asset}"`);
+  headers.append("WWW-Authenticate", `Payment realm="${baseUrl}/donate", network="${info.network}", asset="${info.asset}"`);
 
   return new Response(JSON.stringify(body, null, 2), { status: 402, headers });
 }

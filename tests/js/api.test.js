@@ -120,11 +120,12 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
     expect(resp.status).toBe(402);
   });
 
-  it("emits x402 PAYMENT-REQUIRED + WWW-Authenticate: Payment headers", async () => {
+  it("emits x402 PAYMENT-REQUIRED + WWW-Authenticate with both x402 and Payment schemes", async () => {
     const resp = await catchallGet({ request: req("/api/v1") });
     expect(resp.headers.get("PAYMENT-REQUIRED")).toBe("x402");
     const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
-    expect(wwwAuth).toMatch(/^Payment\b/);
+    expect(wwwAuth).toMatch(/\bx402\b/);
+    expect(wwwAuth).toMatch(/\bPayment\b/);
     expect(wwwAuth).toMatch(/asset="USDC"/);
   });
 
@@ -143,13 +144,22 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
     expect(link).toMatch(/rel="x402"/);
   });
 
-  it("body folds x402 + MPP payment methods alongside the structured error", async () => {
+  it("body is x402-spec compliant (x402Version + accepts + error at top level)", async () => {
     const resp = await catchallGet({ request: req("/api/v1") });
     const body = await json(resp);
-    expect(body.error.code).toBe("no_versioned_api");
-    const types = body.paymentMethods.map((m) => m.type);
-    expect(types).toContain("x402");
-    expect(types).toContain("mpp");
+    expect(body.x402Version).toBe(1);
+    expect(Array.isArray(body.accepts)).toBe(true);
+    expect(body.accepts[0].asset).toBe("USDC");
+    expect(body.accepts[0].scheme).toBe("exact");
+    expect(body.error).toBe("payment_required");
+  });
+
+  it("body _meta carries the structured error + MPP alternative", async () => {
+    const resp = await catchallGet({ request: req("/api/v1") });
+    const body = await json(resp);
+    expect(body._meta.code).toBe("no_versioned_api");
+    expect(body._meta.alternativePayment.type).toBe("mpp");
+    expect(body._meta.alternativePayment.asset).toBe("USDC");
   });
 
   it("nested paths under /api/v1 also return 402", async () => {

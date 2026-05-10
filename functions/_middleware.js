@@ -1182,11 +1182,23 @@ export async function onRequest({ request, next, env }) {
     return buildEpisodeMarkdown(ep, baseUrl);
   }
 
-  // /docs and /pricing aliases → serve the corresponding .md bytes with
-  // markdown content-type. Pages routes by URL path, so we can't simply
-  // call next() with a rewritten URL — fetch the static asset via
-  // env.ASSETS instead.
-  const ALIAS_TO_FILE = { "/docs": "/docs.md", "/pricing": "/pricing.md" };
+  // Convenience aliases — paths most consumers expect at the site root,
+  // mapped to canonical artifact paths. Pages routes by URL path, so we
+  // can't call next() with a rewritten URL; we fetch the static asset
+  // via env.ASSETS and re-serve with the right Content-Type.
+  //
+  //   /docs           → /docs.md          (text/markdown)
+  //   /pricing        → /pricing.md       (text/markdown)
+  //   /openapi.json   → /.well-known/openapi.json   (application/json)
+  //   /swagger.json   → /.well-known/openapi.json   (application/json,
+  //                                          legacy Swagger 2.0 path —
+  //                                          we serve the same OAS 3.1)
+  const ALIAS_TO_FILE = {
+    "/docs": "/docs.md",
+    "/pricing": "/pricing.md",
+    "/openapi.json": "/.well-known/openapi.json",
+    "/swagger.json": "/.well-known/openapi.json",
+  };
   if (ALIAS_TO_FILE[path]) {
     const target = ALIAS_TO_FILE[path];
     if (env?.ASSETS) {
@@ -1197,8 +1209,8 @@ export async function onRequest({ request, next, env }) {
       return new Response(text, {
         status: upstream.status,
         headers: {
-          "Content-Type": "text/markdown; charset=utf-8",
-          "Cache-Control": REWRITE_CACHE_CONTROL[target],
+          "Content-Type": REWRITE_CONTENT_TYPES[target] || "text/markdown; charset=utf-8",
+          "Cache-Control": REWRITE_CACHE_CONTROL[target] || "public, max-age=3600, stale-while-revalidate=604800",
           Vary: "Accept",
           Link: linkHeader(baseUrl, null),
         },

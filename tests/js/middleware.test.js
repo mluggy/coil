@@ -218,6 +218,29 @@ describe("/.well-known/mcp dispatch", () => {
   });
 });
 
+describe("/openapi.json + /swagger.json aliases", () => {
+  // env.ASSETS in our test fixture returns markdown for any fetch — the
+  // middleware should still rewrite the Content-Type to application/json
+  // for the OpenAPI aliases, since real Pages serves the JSON file.
+  it("/openapi.json returns application/json content-type", async () => {
+    const resp = await call("/openapi.json");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+  });
+
+  it("/swagger.json (legacy alias) returns application/json", async () => {
+    const resp = await call("/swagger.json");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+  });
+
+  it("aliases include the standard Link header", async () => {
+    const resp = await call("/openapi.json");
+    const link = resp.headers.get("Link") || "";
+    expect(link).toMatch(/rel="sitemap"/);
+  });
+});
+
 describe("legacy redirects", () => {
   it("/subscribe → 301 to /", async () => {
     const resp = await call("/subscribe");

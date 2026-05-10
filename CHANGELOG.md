@@ -114,6 +114,13 @@ User Experience
 New optional GitHub secret
 - `WEB_BOT_AUTH_PRIVATE_KEY` — Ed25519 PEM. Optional. When set, the build emits the public key as a JWK at `/.well-known/http-message-signatures-directory`.
 
+## 1.3.3 — 2026-05-10
+
+MPP audit fix.
+
+### Fixed
+- `/openapi.json` (and the legacy `/swagger.json`) now serve the OpenAPI 3.1 spec — same bytes as `/.well-known/openapi.json`, with `Content-Type: application/json`. MPP audits probe `/openapi.json` looking for the `x-payment-info` extension and were getting 404. The canonical location remains `/.well-known/openapi.json` (per RFC 8615); these are root-level aliases for tooling that expects the older convention.
+
 ## 1.3.2 — 2026-05-10
 
 x402 spec-compliance fix.

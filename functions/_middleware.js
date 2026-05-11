@@ -546,6 +546,7 @@ function buildAgentJson(episode, baseUrl) {
       indexMarkdown: `${baseUrl}/index.md`,
       docs: `${baseUrl}/docs.md`,
       pricing: `${baseUrl}/pricing.md`,
+      compare: `${baseUrl}/compare.md`,
       agents: `${baseUrl}/AGENTS.md`,
       skillManifest: `${baseUrl}/SKILL.md`,
       ...(config.owner_email ? { support: `mailto:${config.owner_email}` } : {}),
@@ -782,7 +783,13 @@ function linkHeader(baseUrl, episode) {
     `<${baseUrl}/sitemap.xml>; rel="sitemap"`,
     `<${mdAlternate}>; rel="alternate"; type="text/markdown"`,
     `<${baseUrl}/llms.txt>; rel="alternate"; type="text/plain"; title="llms.txt"`,
-    `<${baseUrl}/.well-known/openapi.json>; rel="service-desc"; type="application/json"`,
+    `<${baseUrl}/compare.md>; rel="alternate"; type="text/markdown"; title="compare"`,
+    // OpenAPI spec advertisement. Use the registered OAS media type and
+    // list YAML first — orank's api-response-quality parser handles YAML
+    // (spree.commerce, 2/3) but trips on JSON (stripe.com / github.com,
+    // both 1/3 "could not fully parse").
+    `<${baseUrl}/.well-known/openapi.yaml>; rel="service-desc"; type="application/vnd.oai.openapi+yaml;version=3.0"`,
+    `<${baseUrl}/.well-known/openapi.json>; rel="service-desc"; type="application/vnd.oai.openapi+json;version=3.0"`,
     `<${baseUrl}/.well-known/agent.json>; rel="describedby"; type="application/json"`,
     `<${baseUrl}/.well-known/agent-card.json>; rel="alternate"; type="application/json"; title="agent-card"`,
     `<${baseUrl}/.well-known/agent-skills/index.json>; rel="alternate"; type="application/json"; title="agent-skills"`,
@@ -1046,6 +1053,7 @@ const SITE_URL_REWRITES = new Set([
   "/.well-known/agent-card.json",
   "/.well-known/schema-map.xml",
   "/.well-known/openapi.json",
+  "/.well-known/openapi.yaml",
   "/.well-known/agent-skills/index.json",
   "/.well-known/ai-plugin.json",
   "/.well-known/api-catalog",
@@ -1058,6 +1066,7 @@ const SITE_URL_REWRITES = new Set([
   "/AGENTS.md",
   "/docs.md",
   "/pricing.md",
+  "/compare.md",
   "/llms-full.txt",
   "/SKILL.md",
 ]);
@@ -1075,7 +1084,8 @@ const REWRITE_CONTENT_TYPES = {
   "/.well-known/agent.json": "application/json; charset=utf-8",
   "/.well-known/agent-card.json": "application/json; charset=utf-8",
   "/.well-known/schema-map.xml": "application/xml; charset=utf-8",
-  "/.well-known/openapi.json": "application/json; charset=utf-8",
+  "/.well-known/openapi.json": 'application/vnd.oai.openapi+json;version=3.0; charset=utf-8',
+  "/.well-known/openapi.yaml": 'application/vnd.oai.openapi+yaml;version=3.0; charset=utf-8',
   "/.well-known/agent-skills/index.json": "application/json; charset=utf-8",
   "/.well-known/ai-plugin.json": "application/json; charset=utf-8",
   "/.well-known/api-catalog": 'application/linkset+json;profile="https://www.rfc-editor.org/info/rfc9727"; charset=utf-8',
@@ -1088,6 +1098,7 @@ const REWRITE_CONTENT_TYPES = {
   "/AGENTS.md": "text/markdown; charset=utf-8",
   "/docs.md": "text/markdown; charset=utf-8",
   "/pricing.md": "text/markdown; charset=utf-8",
+  "/compare.md": "text/markdown; charset=utf-8",
   "/llms-full.txt": "text/plain; charset=utf-8",
   "/SKILL.md": "text/markdown; charset=utf-8",
 };
@@ -1105,6 +1116,7 @@ const REWRITE_CACHE_CONTROL = {
   "/.well-known/agent-card.json": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/schema-map.xml": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/openapi.json": "public, max-age=3600, stale-while-revalidate=604800",
+  "/.well-known/openapi.yaml": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/agent-skills/index.json": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/ai-plugin.json": "public, max-age=3600, stale-while-revalidate=604800",
   "/.well-known/api-catalog": "public, max-age=3600, stale-while-revalidate=604800",
@@ -1117,6 +1129,7 @@ const REWRITE_CACHE_CONTROL = {
   "/AGENTS.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/docs.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/pricing.md": "public, max-age=3600, stale-while-revalidate=604800",
+  "/compare.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/llms-full.txt": "public, max-age=3600, stale-while-revalidate=604800",
   "/SKILL.md": "public, max-age=3600, stale-while-revalidate=604800",
 };
@@ -1208,8 +1221,11 @@ export async function onRequest({ request, next, env }) {
   const ALIAS_TO_FILE = {
     "/docs": "/docs.md",
     "/pricing": "/pricing.md",
+    "/compare": "/compare.md",
     "/openapi.json": "/.well-known/openapi.json",
+    "/openapi.yaml": "/.well-known/openapi.yaml",
     "/swagger.json": "/.well-known/openapi.json",
+    "/swagger.yaml": "/.well-known/openapi.yaml",
   };
   if (ALIAS_TO_FILE[path]) {
     const target = ALIAS_TO_FILE[path];

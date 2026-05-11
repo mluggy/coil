@@ -222,22 +222,37 @@ describe("/openapi.json + /swagger.json aliases", () => {
   // env.ASSETS in our test fixture returns markdown for any fetch — the
   // middleware should still rewrite the Content-Type to application/json
   // for the OpenAPI aliases, since real Pages serves the JSON file.
-  it("/openapi.json returns application/json content-type", async () => {
+  it("/openapi.json returns the OAS JSON content-type", async () => {
     const resp = await call("/openapi.json");
     expect(resp.status).toBe(200);
-    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+    // application/vnd.oai.openapi+json is the registered OAS media type;
+    // the +json structured suffix makes it JSON-parseable for clients
+    // that don't recognise the vendor prefix.
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/vnd\.oai\.openapi\+json/);
   });
 
-  it("/swagger.json (legacy alias) returns application/json", async () => {
+  it("/swagger.json (legacy alias) returns the OAS JSON content-type", async () => {
     const resp = await call("/swagger.json");
     expect(resp.status).toBe(200);
-    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/vnd\.oai\.openapi\+json/);
   });
 
   it("aliases include the standard Link header", async () => {
     const resp = await call("/openapi.json");
     const link = resp.headers.get("Link") || "";
     expect(link).toMatch(/rel="sitemap"/);
+  });
+
+  it("/openapi.yaml alias returns the OAS YAML content-type", async () => {
+    const resp = await call("/openapi.yaml");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/vnd\.oai\.openapi\+yaml/);
+  });
+
+  it("/compare alias serves compare.md as markdown", async () => {
+    const resp = await call("/compare");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
   });
 });
 

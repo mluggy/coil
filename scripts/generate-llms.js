@@ -180,6 +180,10 @@ root.push("## Pricing");
 root.push(`See [/pricing.md](${SITE}/pricing.md) for a structured pricing block (also embedded inline in [\`?mode=agent\`](${SITE}/?mode=agent)). ${config.pricing || "Free. No signup, no ads, no paywall."}`);
 root.push("");
 
+root.push("## Versus alternatives");
+root.push(`See [/compare.md](${SITE}/compare.md) for how ${config.title}'s agent-readiness (MCP, full transcripts, OpenAPI, zero-auth APIs) contrasts with Spotify, Apple Podcasts, and typical RSS-only podcasts.`);
+root.push("");
+
 const platforms = [
   ["Spotify", config.spotify_url],
   ["Apple Podcasts", config.apple_podcasts_url],
@@ -438,6 +442,7 @@ wk.push(`- [/episodes/llms.txt](${SITE}/episodes/llms.txt) — full episode list
 wk.push(`- [/api/llms.txt](${SITE}/api/llms.txt) — API surface briefing`);
 wk.push(`- [/docs/llms.txt](${SITE}/docs/llms.txt) — docs section briefing`);
 wk.push(`- [/pricing.md](${SITE}/pricing.md) — machine-readable pricing`);
+wk.push(`- [/compare.md](${SITE}/compare.md) — agent-readiness comparison vs typical podcasts`);
 wk.push(`- [/index.md](${SITE}/index.md) — markdown homepage`);
 wk.push(`- [/AGENTS.md](${SITE}/AGENTS.md) — agent contributor notes`);
 wk.push(`- [/sitemap.xml](${SITE}/sitemap.xml), [/robots.txt](${SITE}/robots.txt), [/rss.xml](${SITE}/rss.xml)`);

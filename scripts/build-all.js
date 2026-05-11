@@ -17,6 +17,7 @@ const steps = [
   { label: "generate-sitemap", cmd: "node scripts/generate-sitemap.js" },
   { label: "generate-llms", cmd: "node scripts/generate-llms.js" },
   { label: "generate-pricing", cmd: "node scripts/generate-pricing.js" },
+  { label: "generate-compare", cmd: "node scripts/generate-compare.js" },
   { label: "generate-docs", cmd: "node scripts/generate-docs.js" },
   { label: "generate-agent-files", cmd: "node scripts/generate-agent-files.js" },
   { label: "generate-agent-skills", cmd: "node scripts/generate-agent-skills.js" },

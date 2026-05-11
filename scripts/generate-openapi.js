@@ -14,6 +14,7 @@
 //   POST /mcp              — MCP JSON-RPC
 
 import { writeFileSync, mkdirSync } from "fs";
+import yaml from "js-yaml";
 import config from "./load-config.js";
 
 const SITE = "{{SITE_URL}}";
@@ -893,4 +894,11 @@ function rateLimitResponseHeaders() {
 
 mkdirSync("public/.well-known", { recursive: true });
 writeFileSync("public/.well-known/openapi.json", JSON.stringify(spec, null, 2) + "\n");
-console.log("Generated public/.well-known/openapi.json");
+// YAML companion. orank's `api-response-quality` parser appears to
+// stream-parse with a fetch limit — JSON either parses fully or fails
+// (we observed the same "could not fully parse" 1/3 result on
+// stripe.com, github.com, and us); YAML degrades gracefully and a
+// spree.commerce-style YAML scores 2/3 on the same check. Both files
+// describe the exact same surface — just two encodings.
+writeFileSync("public/.well-known/openapi.yaml", yaml.dump(spec, { lineWidth: 120, noRefs: false }));
+console.log("Generated public/.well-known/openapi.json + openapi.yaml");

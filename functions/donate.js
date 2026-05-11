@@ -17,6 +17,21 @@ const DEFAULT_NETWORK = "base-sepolia"; // Coinbase Base testnet
 const DEFAULT_ASSET = "USDC";
 const DEFAULT_DECIMALS = 6;
 
+// x402 v2 (the version orank's validator accepts cleanly) expects
+// network as a CAIP-2 chain id and asset as the ERC-20 contract address,
+// not free-form strings. Mapping below covers the testnet/mainnet pair
+// for Base + Ethereum (USDC). Anything not mapped falls back to v1 shape.
+const X402_NETWORK_MAP = {
+  "base": { caip2: "eip155:8453", usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+  "base-sepolia": { caip2: "eip155:84532", usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+  "ethereum": { caip2: "eip155:1", usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+  "ethereum-sepolia": { caip2: "eip155:11155111", usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
+};
+
+function x402Network(network) {
+  return X402_NETWORK_MAP[network] || null;
+}
+
 function paymentInfo(baseUrl) {
   const cfg = config.payment || {};
   const address = cfg.usdc_address || cfg.address || "";
@@ -36,17 +51,51 @@ function paymentInfo(baseUrl) {
   };
 }
 
-// x402 v0.4 paymentRequirements shape. Coinbase's spec uses USDC base units
-// (atoms) for maxAmountRequired — 1 USDC = 1_000_000 atoms.
+// x402 v2 PaymentRequirements. orank's x402-support validator expects
+// the v2 shape — `network` as a CAIP-2 chain id, `asset` as the ERC-20
+// contract address, plus `price` and `extra.facilitator`. We keep the
+// canonical USDC contracts in X402_NETWORK_MAP; when the configured
+// network isn't mapped we fall back to the v1 string spelling.
 function x402PaymentRequirements(baseUrl, info) {
   const oneUsdc = 1_000_000;
+  const recommendedAtoms = String(Math.floor(parseFloat(info.recommendedAmount) * oneUsdc));
+  const net = x402Network(info.network);
+  if (net) {
+    return {
+      x402Version: 2,
+      accepts: [
+        {
+          scheme: "exact",
+          network: net.caip2,
+          resource: `${baseUrl}/donate`,
+          description: info.note,
+          mimeType: "application/json",
+          payTo: info.address,
+          price: `$${parseFloat(info.recommendedAmount).toFixed(2)}`,
+          maxAmountRequired: recommendedAtoms,
+          asset: net.usdc,
+          maxTimeoutSeconds: 600,
+          extra: {
+            name: info.asset,
+            version: "2",
+            decimals: info.decimals,
+            facilitator: "https://x402.org/facilitator",
+            minAmountBaseUnits: String(Math.floor(parseFloat(info.minAmount) * oneUsdc)),
+            docsUrl: info.docsUrl,
+            networkLabel: info.network,
+          },
+        },
+      ],
+      error: "Payment required",
+    };
+  }
   return {
     x402Version: 1,
     accepts: [
       {
         scheme: "exact",
         network: info.network,
-        maxAmountRequired: String(Math.floor(parseFloat(info.recommendedAmount) * oneUsdc)),
+        maxAmountRequired: recommendedAtoms,
         resource: `${baseUrl}/donate`,
         description: info.note,
         mimeType: "application/json",
@@ -134,10 +183,16 @@ export async function onRequest({ request }) {
   // Headers — emit two WWW-Authenticate values: scheme "x402" for x402
   // audits and scheme "Payment" for MPP audits. RFC 9110 allows multiple
   // challenges; we use Headers.append to send each as a distinct value.
+  // PAYMENT-REQUIRED is the Base64-encoded x402 PaymentRequirements body
+  // (matches the v2 wire format spree.commerce uses, which orank validates
+  // cleanly). X-Payment-Protocol announces the schema version.
+  const x402Payload = { x402Version: requirements.x402Version, accepts: requirements.accepts, error: requirements.error };
+  const x402B64 = btoa(JSON.stringify(x402Payload));
   const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
-    "PAYMENT-REQUIRED": "x402",
-    "X-Payment-Required": JSON.stringify(requirements),
+    "PAYMENT-REQUIRED": x402B64,
+    "X-Payment-Required": JSON.stringify(x402Payload),
+    "X-Payment-Protocol": requirements.x402Version === 2 ? "x402-v2" : "x402-v1",
     "Link": `<${info.docsUrl}>; rel="payment"; type="text/markdown", <${baseUrl}/.well-known/x402/supported>; rel="x402-supported"; type="application/json"`,
   }));
   headers.append("WWW-Authenticate", `x402 realm="${baseUrl}/donate", network="${info.network}", asset="${info.asset}"`);

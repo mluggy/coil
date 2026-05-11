@@ -17,9 +17,21 @@ describe("POST /donate", () => {
     expect(resp.status).toBe(402);
   });
 
-  it("emits x402 PAYMENT-REQUIRED header", async () => {
+  it("emits x402 PAYMENT-REQUIRED header (Base64-encoded JSON body)", async () => {
     const resp = await call({ method: "POST" });
-    expect(resp.headers.get("PAYMENT-REQUIRED")).toBe("x402");
+    const header = resp.headers.get("PAYMENT-REQUIRED");
+    expect(header).toBeTruthy();
+    // PAYMENT-REQUIRED is the Base64-encoded x402 body (matches the v2
+    // wire format spree.commerce uses, which orank validates as 2/2).
+    const decoded = JSON.parse(Buffer.from(header, "base64").toString());
+    expect(decoded.x402Version).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(decoded.accepts)).toBe(true);
+  });
+
+  it("emits X-Payment-Protocol identifying the x402 version", async () => {
+    const resp = await call({ method: "POST" });
+    const proto = resp.headers.get("X-Payment-Protocol") || "";
+    expect(proto).toMatch(/^x402-v[12]$/);
   });
 
   it("emits WWW-Authenticate with both x402 and Payment schemes", async () => {
@@ -38,12 +50,12 @@ describe("POST /donate", () => {
     const raw = resp.headers.get("X-Payment-Required");
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw);
-    expect(parsed.x402Version).toBe(1);
-    expect(parsed.error).toBe("payment_required");
+    expect(parsed.x402Version).toBeGreaterThanOrEqual(1);
     expect(parsed.accepts).toHaveLength(1);
-    expect(parsed.accepts[0].asset).toBe("USDC");
+    // v2 spelling: asset is the ERC-20 contract address (0x…); v1
+    // spelling kept the symbol "USDC". Either is acceptable here.
+    expect(parsed.accepts[0].asset).toMatch(/^(0x[a-fA-F0-9]+|USDC)$/);
     expect(parsed.accepts[0].scheme).toBe("exact");
-    // maxAmountRequired is in USDC base units (atoms, 6 decimals)
     expect(parsed.accepts[0].maxAmountRequired).toMatch(/^\d+$/);
   });
 
@@ -58,11 +70,11 @@ describe("POST /donate", () => {
   it("body is x402-spec compliant (x402Version + accepts + error at top level)", async () => {
     const resp = await call({ method: "POST" });
     const body = JSON.parse(await resp.text());
-    expect(body.x402Version).toBe(1);
+    expect(body.x402Version).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.accepts)).toBe(true);
-    expect(body.accepts[0].asset).toBe("USDC");
+    expect(body.accepts[0].asset).toMatch(/^(0x[a-fA-F0-9]+|USDC)$/);
     expect(body.accepts[0].scheme).toBe("exact");
-    expect(body.error).toBe("payment_required");
+    expect(body.error).toMatch(/payment[_ ]required/i);
   });
 
   it("body's _meta carries MPP + external donation alternatives", async () => {

@@ -14,6 +14,16 @@ import { apiHeaders, apiError, corsPreflight } from "../_api.js";
 const DEFAULT_NETWORK = "base-sepolia";
 const DEFAULT_ASSET = "USDC";
 
+// Mirror functions/donate.js — same CAIP-2 + USDC contract mapping so
+// the catchall x402 v2 body validates the same way orank validated
+// spree.commerce (the only check in this layer that scores 2/2 today).
+const X402_NETWORK_MAP = {
+  "base": { caip2: "eip155:8453", usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+  "base-sepolia": { caip2: "eip155:84532", usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+  "ethereum": { caip2: "eip155:1", usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+  "ethereum-sepolia": { caip2: "eip155:11155111", usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
+};
+
 function paymentRequiredResponse({ request }) {
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
@@ -24,23 +34,66 @@ function paymentRequiredResponse({ request }) {
   const oneUsdc = 1_000_000;
   const recommended = parseFloat(cfg.suggested_amount || "1.00");
 
-  // x402-spec body: every PaymentRequirements field is required by the v1
-  // schema (scheme, network, maxAmountRequired, resource, description,
-  // mimeType, payTo, maxTimeoutSeconds, asset, extra). `resource` is the
-  // URL the client should retry with X-Payment — that's the same URL it
-  // hit, not /donate. The earlier shape pointed `resource` at /donate
-  // which orank's x402 validator rejected ("could not validate x402
-  // schema").
+  // x402 v2 PaymentRequirements (the version orank validates cleanly).
+  // network = CAIP-2 chain id, asset = ERC-20 contract address. `resource`
+  // echoes the request URL the client should retry with X-Payment.
   const requestUrl = `${baseUrl}${url.pathname}${url.search}`;
-  const body = {
+  const net = X402_NETWORK_MAP[network];
+  const description = `No versioned API at ${url.pathname}. ${config.title || "This podcast"} ships free read endpoints; tips welcome at /donate.`;
+  const recommendedAtoms = String(Math.floor(recommended * oneUsdc));
+  const meta = {
+    code: "no_versioned_api",
+    message: `No versioned API at ${url.pathname}. The free read endpoints are unversioned.`,
+    hint: `${baseUrl}/api/llms.txt — full list of supported endpoints. ${baseUrl}/donate — voluntary USDC tip jar.`,
+    docs_url: `${baseUrl}/api/llms.txt`,
+    alternativePayment: {
+      type: "mpp",
+      scheme: "stablecoin",
+      asset,
+      network,
+      address,
+      amount: recommended.toFixed(2),
+      currency: "USD",
+      memo: `Tip for ${config.title || "podcast"}`,
+    },
+  };
+  const body = net ? {
+    x402Version: 2,
+    accepts: [
+      {
+        scheme: "exact",
+        network: net.caip2,
+        resource: requestUrl,
+        description,
+        mimeType: "application/json",
+        payTo: address,
+        price: `$${recommended.toFixed(2)}`,
+        maxAmountRequired: recommendedAtoms,
+        asset: net.usdc,
+        maxTimeoutSeconds: 600,
+        extra: {
+          name: asset,
+          version: "2",
+          decimals: 6,
+          facilitator: "https://x402.org/facilitator",
+          minAmountBaseUnits: String(Math.floor(parseFloat(cfg.min_amount || "0.01") * oneUsdc)),
+          docsUrl: `${baseUrl}/pricing.md`,
+          tipJar: `${baseUrl}/donate`,
+          networkLabel: network,
+        },
+      },
+    ],
+    error: "Payment required",
+    _meta: meta,
+  } : {
     x402Version: 1,
     accepts: [
       {
         scheme: "exact",
         network,
-        maxAmountRequired: String(Math.floor(recommended * oneUsdc)),
+        maxAmountRequired: recommendedAtoms,
         resource: requestUrl,
-        description: `No versioned API at ${url.pathname}. ${config.title || "This podcast"} ships free read endpoints; tips welcome at /donate.`,
+        description,
         mimeType: "application/json",
         payTo: address,
         maxTimeoutSeconds: 600,
@@ -54,31 +107,22 @@ function paymentRequiredResponse({ request }) {
       },
     ],
     error: "payment_required",
-    _meta: {
-      code: "no_versioned_api",
-      message: `No versioned API at ${url.pathname}. The free read endpoints are unversioned.`,
-      hint: `${baseUrl}/api/llms.txt — full list of supported endpoints. ${baseUrl}/donate — voluntary USDC tip jar.`,
-      docs_url: `${baseUrl}/api/llms.txt`,
-      alternativePayment: {
-        type: "mpp",
-        scheme: "stablecoin",
-        asset,
-        network,
-        address,
-        amount: recommended.toFixed(2),
-        currency: "USD",
-        memo: `Tip for ${config.title || "podcast"}`,
-      },
-    },
+    _meta: meta,
   };
 
   // Build headers manually so we can emit two WWW-Authenticate values:
   // one with scheme "x402" (canonical x402 audits) and one with scheme
   // "Payment" (MPP audits). RFC 9110 allows multiple challenge values.
+  // PAYMENT-REQUIRED carries the Base64-encoded body so probing scanners
+  // can decode the schema from the header alone (matches spree's pattern,
+  // which orank scores 2/2 for x402-support).
+  const x402Payload = { x402Version: body.x402Version, accepts: body.accepts, error: body.error };
+  const x402B64 = btoa(JSON.stringify(x402Payload));
   const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
-    "PAYMENT-REQUIRED": "x402",
+    "PAYMENT-REQUIRED": x402B64,
     "X-Payment-Required": JSON.stringify({ x402Version: body.x402Version, accepts: body.accepts, error: body.error }),
+    "X-Payment-Protocol": body.x402Version === 2 ? "x402-v2" : "x402-v1",
     "Link": `<${baseUrl}/donate>; rel="payment"; type="application/json", <${baseUrl}/.well-known/x402/supported>; rel="x402"; type="application/json"`,
   }));
   headers.append("WWW-Authenticate", `x402 realm="${baseUrl}/donate", network="${network}", asset="${asset}"`);

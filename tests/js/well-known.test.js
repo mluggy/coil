@@ -103,10 +103,14 @@ describe(".well-known/openid-configuration", () => {
 });
 
 describe(".well-known/x402 + discovery", () => {
-  it("x402/supported declares USDC + base-sepolia", () => {
+  it("x402/supported declares the Base Sepolia USDC contract (v2 wire format)", () => {
     const m = readJson("public/.well-known/x402/supported");
-    expect(m.network).toBe("base-sepolia");
-    expect(m.accepts[0].asset).toBe("USDC");
+    expect(m.x402Version).toBe(2);
+    // v2: network is a CAIP-2 chain id; the human label rides in extra.
+    expect(m.network).toBe("eip155:84532");
+    expect(m.accepts[0].asset).toMatch(/^0x[a-fA-F0-9]{40}$/);
+    expect(m.accepts[0].extra?.name).toBe("USDC");
+    expect(m.accepts[0].extra?.networkLabel).toBe("base-sepolia");
   });
 
   it("discovery/resources lists /donate as a resource", () => {

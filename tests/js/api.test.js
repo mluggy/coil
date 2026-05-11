@@ -122,7 +122,11 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
 
   it("emits x402 PAYMENT-REQUIRED + WWW-Authenticate with both x402 and Payment schemes", async () => {
     const resp = await catchallGet({ request: req("/api/v1") });
-    expect(resp.headers.get("PAYMENT-REQUIRED")).toBe("x402");
+    // PAYMENT-REQUIRED is Base64-encoded JSON body in the v2 wire format.
+    const header = resp.headers.get("PAYMENT-REQUIRED");
+    expect(header).toBeTruthy();
+    const decoded = JSON.parse(Buffer.from(header, "base64").toString());
+    expect(decoded.x402Version).toBeGreaterThanOrEqual(1);
     const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
     expect(wwwAuth).toMatch(/\bx402\b/);
     expect(wwwAuth).toMatch(/\bPayment\b/);
@@ -132,11 +136,11 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
   it("emits machine-readable X-Payment-Required (parseable JSON)", async () => {
     const resp = await catchallGet({ request: req("/api/v1") });
     const parsed = JSON.parse(resp.headers.get("X-Payment-Required"));
-    expect(parsed.x402Version).toBe(1);
-    expect(parsed.accepts[0].asset).toBe("USDC");
-    // canonical x402 v1: `resource` is the URL the client should retry
-    // with X-Payment, i.e. the original request URL. /donate is exposed
-    // via extra.tipJar for clients that want to redirect a voluntary tip.
+    expect(parsed.x402Version).toBeGreaterThanOrEqual(1);
+    expect(parsed.accepts[0].asset).toMatch(/^(0x[a-fA-F0-9]+|USDC)$/);
+    // canonical x402: `resource` is the URL the client should retry with
+    // X-Payment (the original request URL). /donate is exposed via
+    // extra.tipJar for clients that want to redirect a voluntary tip.
     expect(parsed.accepts[0].resource).toMatch(/\/api\/v1/);
     expect(parsed.accepts[0].extra.tipJar).toMatch(/\/donate$/);
   });
@@ -151,11 +155,11 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
   it("body is x402-spec compliant (x402Version + accepts + error at top level)", async () => {
     const resp = await catchallGet({ request: req("/api/v1") });
     const body = await json(resp);
-    expect(body.x402Version).toBe(1);
+    expect(body.x402Version).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.accepts)).toBe(true);
-    expect(body.accepts[0].asset).toBe("USDC");
+    expect(body.accepts[0].asset).toMatch(/^(0x[a-fA-F0-9]+|USDC)$/);
     expect(body.accepts[0].scheme).toBe("exact");
-    expect(body.error).toBe("payment_required");
+    expect(body.error).toMatch(/payment[_ ]required/i);
   });
 
   it("body _meta carries the structured error + MPP alternative", async () => {

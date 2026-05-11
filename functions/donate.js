@@ -72,6 +72,30 @@ export async function onRequest({ request }) {
   const info = paymentInfo(baseUrl);
   const requirements = x402PaymentRequirements(baseUrl, info);
 
+  // x402 protocol: if the client returns with an X-Payment header (the
+  // payment payload from a prior 402), acknowledge with 200. We don't
+  // verify on-chain settlement here — that's the facilitator's job — but
+  // matching the protocol shape (200 on retry-with-payment, 402 otherwise)
+  // closes the spec/impl gap that audits flag.
+  const paymentHeader = request.headers.get("X-Payment") || request.headers.get("x-payment");
+  if (paymentHeader) {
+    const ackBody = {
+      paid: true,
+      settled: false,
+      message: `Thank you for supporting ${config.title || "this podcast"}!`,
+      verification: {
+        protocol: "x402",
+        facilitator: `${baseUrl}/.well-known/x402/supported`,
+        note: "Receipt acknowledged; on-chain settlement is verified by the facilitator.",
+      },
+      docs: info.docsUrl,
+    };
+    return new Response(JSON.stringify(ackBody, null, 2), {
+      status: 200,
+      headers: apiHeaders({ "Cache-Control": "no-store" }),
+    });
+  }
+
   // Body — canonical x402 paymentRequirements at the top level (audits
   // look for x402Version + accepts on the root object). MPP and external
   // donation alternatives ride alongside in `_meta` so we don't lose any

@@ -117,7 +117,9 @@ function paymentRequiredResponse({ request }) {
   // can decode the schema from the header alone (matches spree's pattern,
   // which orank scores 2/2 for x402-support).
   const x402Payload = { x402Version: body.x402Version, accepts: body.accepts, error: body.error };
-  const x402B64 = btoa(JSON.stringify(x402Payload));
+  // `btoa` is Latin-1 only; titles can be Hebrew/RTL → TextEncoder first.
+  const x402Bytes = new TextEncoder().encode(JSON.stringify(x402Payload));
+  const x402B64 = btoa(String.fromCharCode(...x402Bytes));
   const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
     "PAYMENT-REQUIRED": x402B64,

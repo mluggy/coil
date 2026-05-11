@@ -187,7 +187,11 @@ export async function onRequest({ request }) {
   // (matches the v2 wire format spree.commerce uses, which orank validates
   // cleanly). X-Payment-Protocol announces the schema version.
   const x402Payload = { x402Version: requirements.x402Version, accepts: requirements.accepts, error: requirements.error };
-  const x402B64 = btoa(JSON.stringify(x402Payload));
+  // `btoa` only accepts Latin-1; the podcast title can contain Hebrew or
+  // other non-ASCII chars via `description`. Round-trip through TextEncoder
+  // so the header is always valid Base64.
+  const x402Bytes = new TextEncoder().encode(JSON.stringify(x402Payload));
+  const x402B64 = btoa(String.fromCharCode(...x402Bytes));
   const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
     "PAYMENT-REQUIRED": x402B64,

@@ -21,6 +21,20 @@ EXTENSIONS = {
     ".xml": "application/rss+xml",
 }
 
+# Guardrail: an LFS smudge that silently failed (e.g. bandwidth quota
+# exhausted) leaves the working tree with 130-byte pointer text where the
+# real binary should be. Uploading that text to R2 overwrites the real
+# audio with a stub, breaking every listener. Detect and refuse.
+LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def is_lfs_pointer(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(LFS_POINTER_PREFIX)) == LFS_POINTER_PREFIX
+    except OSError:
+        return False
+
 
 def md5_of_file(path):
     h = hashlib.md5()
@@ -64,6 +78,16 @@ def main():
 
         local_path = os.path.join(args.episodes_dir, entry)
         if not os.path.isfile(local_path):
+            continue
+
+        if is_lfs_pointer(local_path):
+            failures += 1
+            print(
+                f"Refusing to upload {entry}: file is a Git LFS pointer, "
+                "not real content. The LFS smudge filter likely failed "
+                "(bandwidth/quota?). Fix LFS in the runner and rerun.",
+                file=sys.stderr,
+            )
             continue
 
         key = entry

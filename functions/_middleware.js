@@ -669,6 +669,8 @@ const WELL_KNOWN_MCP_PATHS = new Set([
 const WELL_KNOWN_MCP_SERVER_CARD = "/.well-known/mcp/server-card.json";
 
 function buildMcpManifest(baseUrl) {
+  const iconUrl = `${baseUrl}${config.cover || "/cover.png"}`;
+  const iconMime = config.cover_ext === "jpg" ? "image/jpeg" : "image/png";
   return new Response(
     JSON.stringify(
       {
@@ -676,6 +678,11 @@ function buildMcpManifest(baseUrl) {
         name: MCP_SERVER_INFO.name,
         title: config.title,
         description: config.description || "",
+        // Logo + category lift agent-recommendation rates on MCP registries
+        // (orank "Registry branding" check).
+        icon: iconUrl,
+        icons: [{ src: iconUrl, sizes: "any", type: iconMime }],
+        category: "podcast",
         version: MCP_SERVER_INFO.version,
         protocolVersion: MCP_PROTOCOL_VERSION,
         transport: "streamable-http",
@@ -723,6 +730,8 @@ function buildMcpManifest(baseUrl) {
 // agent opens a transport connection. Schema: name, description, version,
 // serverUrl, tools[].
 function buildMcpServerCard(baseUrl) {
+  const iconUrl = `${baseUrl}${config.cover || "/cover.png"}`;
+  const iconMime = config.cover_ext === "jpg" ? "image/jpeg" : "image/png";
   const card = {
     $schema: "https://modelcontextprotocol.io/schemas/server-card.json",
     name: MCP_SERVER_INFO.name,
@@ -730,6 +739,9 @@ function buildMcpServerCard(baseUrl) {
     description:
       `Listener-facing MCP server for ${config.title}. ` +
       "Search episodes, fetch transcripts, get the latest, browse the catalog, and grab the RSS feed for subscription.",
+    icon: iconUrl,
+    icons: [{ src: iconUrl, sizes: "any", type: iconMime }],
+    category: "podcast",
     version: MCP_SERVER_INFO.version,
     protocolVersion: MCP_PROTOCOL_VERSION,
     transport: "streamable-http",

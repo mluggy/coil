@@ -24,10 +24,14 @@ function paymentRequiredResponse({ request }) {
   const oneUsdc = 1_000_000;
   const recommended = parseFloat(cfg.suggested_amount || "1.00");
 
-  // x402-spec body: top-level x402Version + accepts + error are required
-  // for canonical x402 detection. Audit parsers fail if these aren't on
-  // the root object. The structured error envelope and MPP alternative
-  // ride alongside in `_meta` so we don't lose any information.
+  // x402-spec body: every PaymentRequirements field is required by the v1
+  // schema (scheme, network, maxAmountRequired, resource, description,
+  // mimeType, payTo, maxTimeoutSeconds, asset, extra). `resource` is the
+  // URL the client should retry with X-Payment — that's the same URL it
+  // hit, not /donate. The earlier shape pointed `resource` at /donate
+  // which orank's x402 validator rejected ("could not validate x402
+  // schema").
+  const requestUrl = `${baseUrl}${url.pathname}${url.search}`;
   const body = {
     x402Version: 1,
     accepts: [
@@ -35,12 +39,18 @@ function paymentRequiredResponse({ request }) {
         scheme: "exact",
         network,
         maxAmountRequired: String(Math.floor(recommended * oneUsdc)),
-        resource: `${baseUrl}/donate`,
+        resource: requestUrl,
         description: `No versioned API at ${url.pathname}. ${config.title || "This podcast"} ships free read endpoints; tips welcome at /donate.`,
         mimeType: "application/json",
         payTo: address,
         maxTimeoutSeconds: 600,
         asset,
+        extra: {
+          decimals: 6,
+          minAmountBaseUnits: String(Math.floor(parseFloat(cfg.min_amount || "0.01") * oneUsdc)),
+          docsUrl: `${baseUrl}/pricing.md`,
+          tipJar: `${baseUrl}/donate`,
+        },
       },
     ],
     error: "payment_required",

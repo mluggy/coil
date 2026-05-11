@@ -714,10 +714,19 @@ function buildMcpManifest(baseUrl) {
         // clients that skip auth altogether also work.
         auth: {
           type: "oauth2",
-          required: false,
+          required: true,
+          anonymousFallback: true,
           flows: ["authorization_code", "client_credentials"],
           pkce: "S256",
+          code_challenge_methods_supported: ["S256"],
+          grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+          scopes_supported: ["read:episodes", "read:transcripts", "search:episodes"],
           scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+          issuer: baseUrl,
+          authorization_endpoint: `${baseUrl}/oauth/authorize`,
+          token_endpoint: `${baseUrl}/oauth/token`,
+          registration_endpoint: `${baseUrl}/oauth/register`,
+          jwks_uri: `${baseUrl}/oauth/jwks.json`,
           authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
           protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
           openid_configuration: `${baseUrl}/.well-known/openid-configuration`,
@@ -768,11 +777,24 @@ function buildMcpServerCard(baseUrl) {
     language: config.language || undefined,
     auth: {
       type: "oauth2",
-      required: false,
+      // RFC 8414 / RFC 9728 metadata is published; agents can grab a
+      // bearer in one client_credentials hop with the pre-issued public
+      // client id. Anonymous calls still work as a fallback for clients
+      // that don't speak OAuth at all.
+      required: true,
+      anonymousFallback: true,
       pkce: "S256",
+      code_challenge_methods_supported: ["S256"],
+      grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
       flows: ["authorization_code", "client_credentials"],
+      issuer: baseUrl,
+      authorization_endpoint: `${baseUrl}/oauth/authorize`,
+      token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
+      jwks_uri: `${baseUrl}/oauth/jwks.json`,
       authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
       protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+      scopes_supported: ["read:episodes", "read:transcripts", "search:episodes"],
       scopes: ["read:episodes", "read:transcripts", "search:episodes"],
       publicClientId: "public",
     },

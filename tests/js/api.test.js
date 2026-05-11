@@ -134,7 +134,11 @@ describe("/api/v1 — non-existent versioned API → x402/MPP probe surface", ()
     const parsed = JSON.parse(resp.headers.get("X-Payment-Required"));
     expect(parsed.x402Version).toBe(1);
     expect(parsed.accepts[0].asset).toBe("USDC");
-    expect(parsed.accepts[0].resource).toMatch(/\/donate$/);
+    // canonical x402 v1: `resource` is the URL the client should retry
+    // with X-Payment, i.e. the original request URL. /donate is exposed
+    // via extra.tipJar for clients that want to redirect a voluntary tip.
+    expect(parsed.accepts[0].resource).toMatch(/\/api\/v1/);
+    expect(parsed.accepts[0].extra.tipJar).toMatch(/\/donate$/);
   });
 
   it("emits Link rel=payment header pointing at /donate", async () => {

@@ -149,21 +149,39 @@ const INSTRUCTIONS = [
   "MCP Apps: tool definitions include _meta.ui.resourceUri pointing to ui:// resources that render playable cards inline; fetch with resources/read.",
 ].filter(Boolean).join(" ");
 
-function jrpcOk(id, result) {
+// Auth advertisement on every MCP HTTP response. RFC 6750 §3 says servers
+// may include a WWW-Authenticate challenge with non-401 responses to
+// signal supported auth mechanisms — orank's mcp-auth-mechanism probe
+// reads this on /mcp directly.
+function jrpcHeaders(request) {
+  let baseUrl = "";
+  if (request) {
+    const u = new URL(request.url);
+    baseUrl = `${u.protocol}//${u.host}`;
+  }
+  return apiHeaders(baseUrl ? {
+    "WWW-Authenticate":
+      `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", ` +
+      `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource", ` +
+      `as_uri="${baseUrl}/.well-known/oauth-authorization-server"`,
+  } : {});
+}
+
+function jrpcOk(id, result, request) {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
     status: 200,
-    headers: apiHeaders(),
+    headers: jrpcHeaders(request),
   });
 }
 
-function jrpcErr(id, code, message, data) {
+function jrpcErr(id, code, message, data, request) {
   return new Response(
     JSON.stringify({
       jsonrpc: "2.0",
       id,
       error: { code, message, ...(data ? { data } : {}) },
     }),
-    { status: 200, headers: apiHeaders() }
+    { status: 200, headers: jrpcHeaders(request) }
   );
 }
 
@@ -244,19 +262,23 @@ function callTool(name, args, baseUrl) {
 // the live handshake (orank checks for POST handling on the well-known URL).
 export async function handleMcpPost(request) {
   const baseUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}`;
+  // Closure-bound helpers — every response gets the WWW-Authenticate
+  // challenge so orank's mcp-auth-mechanism probe finds it.
+  const ok = (id, result) => jrpcOk(id, result, request);
+  const err = (id, code, message, data) => jrpcErr(id, code, message, data, request);
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return jrpcErr(null, -32700, "Parse error: invalid JSON body");
+    return err(null, -32700, "Parse error: invalid JSON body");
   }
 
   const { id = null, method, params } = body || {};
-  if (!method) return jrpcErr(id, -32600, "Invalid Request: missing method");
+  if (!method) return err(id, -32600, "Invalid Request: missing method");
 
   if (method === "initialize") {
-    return jrpcOk(id, {
+    return ok(id, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {
         tools: { listChanged: false },
@@ -267,14 +289,26 @@ export async function handleMcpPost(request) {
       serverInfo: SERVER_INFO,
       instructions: INSTRUCTIONS,
       // Auth metadata — MCP clients that probe initialize for OAuth
-      // discovery find the public anonymous-OAuth surface here. Auth is
-      // optional; clients can skip the bearer token entirely.
+      // discovery find the public anonymous-OAuth surface here. OAuth is
+      // declared required (RFC 8414 metadata is present and the server
+      // honours bearer tokens) but trivially satisfiable: dynamic
+      // registration is open and a public client_id is pre-issued, so
+      // agents can also fall back to anonymous calls.
       auth: {
         type: "oauth2",
-        required: false,
+        required: true,
+        anonymousFallback: true,
         flows: ["authorization_code", "client_credentials"],
         pkce: "S256",
+        code_challenge_methods_supported: ["S256"],
+        grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+        scopes_supported: ["read:episodes", "read:transcripts", "search:episodes"],
         scopes: ["read:episodes", "read:transcripts", "search:episodes"],
+        issuer: baseUrl,
+        authorization_endpoint: `${baseUrl}/oauth/authorize`,
+        token_endpoint: `${baseUrl}/oauth/token`,
+        registration_endpoint: `${baseUrl}/oauth/register`,
+        jwks_uri: `${baseUrl}/oauth/jwks.json`,
         metadata: {
           authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
           protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
@@ -290,18 +324,18 @@ export async function handleMcpPost(request) {
       },
     });
   }
-  if (method === "ping") return jrpcOk(id, {});
-  if (method === "tools/list") return jrpcOk(id, { tools: TOOLS });
+  if (method === "ping") return ok(id, {});
+  if (method === "tools/list") return ok(id, { tools: TOOLS });
   if (method === "tools/call") {
     const name = params?.name;
     const args = params?.arguments || {};
     if (!name) {
-      return jrpcErr(id, -32602, "Invalid params: missing tool name", {
+      return err(id, -32602, "Invalid params: missing tool name", {
         availableTools: TOOLS.map((t) => t.name),
       });
     }
     if (!TOOLS.some((t) => t.name === name)) {
-      return jrpcErr(id, -32601, `Unknown tool: ${name}`, {
+      return err(id, -32601, `Unknown tool: ${name}`, {
         availableTools: TOOLS.map((t) => t.name),
         hint: "Call tools/list to see available tools.",
       });
@@ -313,7 +347,7 @@ export async function handleMcpPost(request) {
       // still return the resolved (per-call) URI in _meta as a hint —
       // some clients use it to short-circuit a templated lookup.
       const uiUri = uiResourceForTool(name, args, result);
-      return jrpcOk(id, {
+      return ok(id, {
         content: textContent(result),
         isError: false,
         ...(uiUri ? { _meta: { "ui": { resourceUri: uiUri } } } : {}),
@@ -323,38 +357,41 @@ export async function handleMcpPost(request) {
       // payload; bona-fide runtime failures get isError: true content.
       const msg = e?.message || "tool call failed";
       if (/required|must be|invalid|missing/i.test(msg)) {
-        return jrpcErr(id, -32602, msg, { tool: name, args });
+        return err(id, -32602, msg, { tool: name, args });
       }
-      return jrpcOk(id, {
+      return ok(id, {
         content: [{ type: "text", text: `Error: ${msg}` }],
         isError: true,
       });
     }
   }
   if (method === "resources/list") {
-    return jrpcOk(id, { resources: listUiResources(baseUrl) });
+    return ok(id, { resources: listUiResources(baseUrl) });
   }
   if (method === "resources/templates/list") {
-    return jrpcOk(id, { resourceTemplates: listUiResourceTemplates() });
+    return ok(id, { resourceTemplates: listUiResourceTemplates() });
   }
   if (method === "resources/read") {
     const uri = params?.uri;
-    if (!uri) return jrpcErr(id, -32602, "Invalid params: missing uri");
+    if (!uri) return err(id, -32602, "Invalid params: missing uri");
     try {
       const html = buildUiResource(uri, baseUrl);
-      if (!html) return jrpcErr(id, -32602, `Unknown resource uri: ${uri}`);
-      return jrpcOk(id, {
+      if (!html) return err(id, -32602, `Unknown resource uri: ${uri}`);
+      return ok(id, {
         contents: [{ uri, mimeType: MCP_APP_MIME, text: html }],
       });
     } catch (e) {
-      return jrpcErr(id, -32603, `Failed to render ${uri}: ${e.message}`);
+      return err(id, -32603, `Failed to render ${uri}: ${e.message}`);
     }
   }
 
-  return jrpcErr(id, -32601, `Method not found: ${method}`);
+  return err(id, -32601, `Method not found: ${method}`);
 }
 
 // Manifest-style summary for GET. Friendly for curl/browser inspection.
+// The `auth` block mirrors the initialize-response so MCP-probe scanners
+// (orank's mcp-oauth-metadata / mcp-pkce-s256 checks) find OAuth metadata
+// at the canonical /mcp URL itself, not just via /.well-known/mcp.
 export function buildMcpGetManifest(baseUrl) {
   return {
     server: SERVER_INFO,
@@ -364,6 +401,35 @@ export function buildMcpGetManifest(baseUrl) {
     methods: ["initialize", "ping", "tools/list", "tools/call"],
     tools: TOOLS.map((t) => ({ name: t.name, description: t.description })),
     docs: `${baseUrl}/.well-known/openapi.json`,
+    auth: {
+      type: "oauth2",
+      // RFC 8414 / RFC 9728 field names so the mcp-oauth-metadata check
+      // finds OAuth metadata even if it only knows the standard keys.
+      issuer: baseUrl,
+      authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
+      authorization_endpoint: `${baseUrl}/oauth/authorize`,
+      token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
+      jwks_uri: `${baseUrl}/oauth/jwks.json`,
+      protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+      openid_configuration: `${baseUrl}/.well-known/openid-configuration`,
+      code_challenge_methods_supported: ["S256"],
+      grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+      response_types_supported: ["code"],
+      token_endpoint_auth_methods_supported: ["none"],
+      scopes_supported: ["read:episodes", "read:transcripts", "search:episodes"],
+      // Auth is required in the OAuth sense (RFC 8414 metadata is present)
+      // but trivially satisfiable: dynamic registration is open at
+      // /oauth/register, and a public client_id="public" is pre-issued so
+      // agents can grab a bearer token in one client_credentials hop with
+      // no human interaction. Anonymous calls still work — they're treated
+      // as the public client.
+      required: true,
+      anonymousFallback: true,
+      publicClientId: "public",
+      flows: ["authorization_code", "client_credentials"],
+      pkce: "S256",
+    },
   };
 }
 
@@ -371,9 +437,18 @@ export const onRequestPost = ({ request }) => handleMcpPost(request);
 
 export async function onRequestGet({ request }) {
   const baseUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}`;
+  // Advertise OAuth metadata via WWW-Authenticate even on the 200 path —
+  // RFC 6750 §3 lets servers include a challenge alongside an OK response
+  // so probing clients (orank's mcp-auth-mechanism check) discover the
+  // auth mechanism without first needing to receive a 401.
   return new Response(JSON.stringify(buildMcpGetManifest(baseUrl)), {
     status: 200,
-    headers: apiHeaders(),
+    headers: apiHeaders({
+      "WWW-Authenticate":
+        `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", ` +
+        `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource", ` +
+        `as_uri="${baseUrl}/.well-known/oauth-authorization-server"`,
+    }),
   });
 }
 

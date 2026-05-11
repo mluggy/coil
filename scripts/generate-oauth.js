@@ -9,8 +9,10 @@
 // see functions/oauth.js for the issuer.
 
 import { writeFileSync, mkdirSync } from "fs";
+import config from "./load-config.js";
 
 const SITE = "{{SITE_URL}}";
+const PAY_TO = config?.payment?.usdc_address || config?.payment?.address || "";
 
 mkdirSync("public/.well-known", { recursive: true });
 
@@ -102,17 +104,29 @@ console.log("Generated public/.well-known/openid-configuration");
 // can route a tip if a listener wants to support the show. Keeps orank's
 // x402 check happy and gives a real surface for paid tips.
 mkdirSync("public/.well-known/x402", { recursive: true });
+// `accepts[]` entries must satisfy the x402 v1 PaymentRequirements schema:
+// scheme, network, maxAmountRequired, resource, description, mimeType,
+// payTo, maxTimeoutSeconds, asset are all required. Earlier shape was
+// missing resource/mimeType/payTo/maxTimeoutSeconds — orank's x402-support
+// validator caught that ("could not validate x402 schema").
 const x402Supported = {
+  x402Version: 1,
   version: "0.4",
   network: "base-sepolia",
   facilitator: `${SITE}/donate`,
+  resource: `${SITE}/donate`,
   accepts: [
     {
       scheme: "exact",
-      asset: "USDC",
       network: "base-sepolia",
       maxAmountRequired: "1000000",
+      resource: `${SITE}/donate`,
       description: `Optional tip to support ${SITE}`,
+      mimeType: "application/json",
+      payTo: PAY_TO,
+      maxTimeoutSeconds: 600,
+      asset: "USDC",
+      extra: { decimals: 6, minAmountBaseUnits: "10000" },
     },
   ],
 };

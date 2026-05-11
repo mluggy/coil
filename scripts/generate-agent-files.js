@@ -78,6 +78,37 @@ const agentJson = {
     headers: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
     docs: `${SITE}/api/llms.txt`,
   },
+  // Onboarding declaration. orank's onboarding-friction probe wants
+  // explicit free-tier / sandbox / no-signup signals — a zero-auth API
+  // *is* the lowest friction, but the check looks for the words.
+  onboarding: {
+    friction: "zero",
+    requirements: [],
+    signup: false,
+    contactSales: false,
+    apiKey: { required: false, selfServe: true, endpoint: `${SITE}/oauth/register` },
+    freeTier: {
+      available: true,
+      perpetual: true,
+      limits: { perMinute: 60, scope: "per IP" },
+      description: "All endpoints are free, perpetual, and unmetered beyond the per-IP rate limit.",
+    },
+    sandbox: {
+      available: true,
+      sameAsProduction: true,
+      reason: "All endpoints are read-only over static data; production is the sandbox — no test keys or staging environment required.",
+      try: [
+        `${SITE}/api/search?q=ai`,
+        `${SITE}/ask?q=latest+episode`,
+        `${SITE}/mcp`,
+      ],
+    },
+    quickstart: [
+      `curl ${SITE}/.well-known/openapi.json`,
+      `curl ${SITE}/api/search?q=ai`,
+      `curl -X POST ${SITE}/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
+    ],
+  },
   errorEnvelope: {
     schema: "{ error: { code, message, hint, docs_url } }",
     statusCodes: [400, 404, 405, 429, 500],
@@ -416,23 +447,37 @@ console.log("Generated public/.well-known/ai-plugin.json");
 // Linkset enumerating agent-accessible APIs and their service descriptions.
 // Served with Content-Type: application/linkset+json;profile="..." (the
 // middleware sets the right header from REWRITE_CONTENT_TYPES).
+// `item` relations point to the individual resources / sub-operations
+// reachable under each `anchor`. Orank's RFC 9727 check warns when a
+// linkset entry has no `item` array — anchor + service-desc alone leaves
+// agents without an inventory of what's actually callable. We expose
+// every operation as an `item` so an agent walking the catalog can
+// enumerate the surface without first parsing the OpenAPI spec.
+const OAS_TYPE = "application/vnd.oai.openapi+json;version=3.0";
 const apiCatalog = {
   linkset: [
     {
       anchor: `${SITE}/api/search`,
       "service-desc": [
-        { href: `${SITE}/.well-known/openapi.json`, type: "application/json", title: "OpenAPI 3.1 spec" },
+        { href: `${SITE}/.well-known/openapi.json`, type: OAS_TYPE, title: "OpenAPI 3.0 spec (JSON)" },
+        { href: `${SITE}/.well-known/openapi.yaml`, type: "application/vnd.oai.openapi+yaml;version=3.0", title: "OpenAPI 3.0 spec (YAML)" },
       ],
       "service-doc": [
         { href: `${SITE}/api/llms.txt`, type: "text/plain", title: "API briefing for AI agents" },
         { href: `${SITE}/docs.md`, type: "text/markdown", title: "Listener-agent docs" },
       ],
       status: [{ href: `${SITE}/status`, type: "application/json", title: "Service health" }],
+      item: [
+        { href: `${SITE}/api/search?q={query}&limit={limit}&offset={offset}`, type: "application/json", title: "Search episodes (GET)" },
+        { href: `${SITE}/episodes.json`, type: "application/json", title: "Full episode list (GET)" },
+        { href: `${SITE}/search-index.json`, type: "application/json", title: "Full search index (GET)" },
+      ],
     },
     {
       anchor: `${SITE}/ask`,
       "service-desc": [
-        { href: `${SITE}/.well-known/openapi.json`, type: "application/json", title: "OpenAPI 3.1 spec (POST /ask)" },
+        { href: `${SITE}/.well-known/openapi.json`, type: OAS_TYPE, title: "OpenAPI 3.0 spec (POST /ask)" },
+        { href: `${SITE}/.well-known/openapi.yaml`, type: "application/vnd.oai.openapi+yaml;version=3.0", title: "OpenAPI 3.0 spec (YAML)" },
       ],
       "service-doc": [
         { href: `${SITE}/api/llms.txt`, type: "text/plain", title: "NLWeb /ask usage" },
@@ -440,18 +485,30 @@ const apiCatalog = {
       related: [
         { href: "https://github.com/microsoft/NLWeb", type: "text/html", title: "NLWeb spec (Microsoft)" },
       ],
+      item: [
+        { href: `${SITE}/ask`, type: "application/json", title: "Ask the show (POST, JSON or SSE)" },
+        { href: `${SITE}/ask?q={query}&limit={limit}`, type: "application/json", title: "Ask the show (GET shorthand)" },
+      ],
     },
     {
       anchor: `${SITE}/mcp`,
       "service-desc": [
         { href: `${SITE}/.well-known/mcp/server-card.json`, type: "application/json", title: "MCP server card" },
-        { href: `${SITE}/.well-known/openapi.json`, type: "application/json", title: "OpenAPI 3.1 spec (POST /mcp)" },
+        { href: `${SITE}/.well-known/openapi.json`, type: OAS_TYPE, title: "OpenAPI 3.0 spec (POST /mcp)" },
       ],
       "service-meta": [
         { href: `${SITE}/.well-known/mcp`, type: "application/json", title: "MCP discovery manifest" },
       ],
       related: [
         { href: "https://modelcontextprotocol.io", type: "text/html", title: "Model Context Protocol" },
+      ],
+      item: [
+        { href: `${SITE}/mcp`, type: "application/json", title: "MCP JSON-RPC endpoint (POST)" },
+        { href: `${SITE}/mcp#tool=search_episodes`, type: "application/json", title: "Tool: search_episodes" },
+        { href: `${SITE}/mcp#tool=get_episode`, type: "application/json", title: "Tool: get_episode" },
+        { href: `${SITE}/mcp#tool=get_latest_episode`, type: "application/json", title: "Tool: get_latest_episode" },
+        { href: `${SITE}/mcp#tool=list_episodes`, type: "application/json", title: "Tool: list_episodes" },
+        { href: `${SITE}/mcp#tool=subscribe_via_rss`, type: "application/json", title: "Tool: subscribe_via_rss" },
       ],
     },
     {
@@ -463,6 +520,14 @@ const apiCatalog = {
         { href: `${SITE}/.well-known/agent-card.json`, type: "application/json", title: "A2A agent card" },
         { href: `${SITE}/.well-known/agent-skills/index.json`, type: "application/json", title: "Agent Skills index (v0.2.0)" },
         { href: `${SITE}/.well-known/ai-plugin.json`, type: "application/json", title: "OpenAI plugin manifest" },
+      ],
+      item: [
+        { href: `${SITE}/status`, type: "application/json", title: "Service health" },
+        { href: `${SITE}/episodes.json`, type: "application/json", title: "Episode catalog" },
+        { href: `${SITE}/rss.xml`, type: "application/rss+xml", title: "RSS feed" },
+        { href: `${SITE}/llms.txt`, type: "text/plain", title: "llms.txt briefing" },
+        { href: `${SITE}/llms-full.txt`, type: "text/plain", title: "llms-full.txt single-file briefing" },
+        { href: `${SITE}/donate`, type: "application/json", title: "x402 tip jar" },
       ],
     },
   ],

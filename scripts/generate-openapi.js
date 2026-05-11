@@ -28,8 +28,13 @@ const errorResponses = {
   "500": { $ref: "#/components/responses/InternalError" },
 };
 
+// Targeting OpenAPI 3.0.3 (not 3.1) for the widest parser/validator support.
+// orank-style audits and many LLM function-calling pipelines still ship 3.0
+// parsers; 3.1's array-typed `type` and JSON-Schema-2020-12 features confuse
+// them, dropping the spec to "partial parse" and cascading to the typed-
+// schema count. 3.0 + `nullable: true` is the safe lowest common denominator.
 const spec = {
-  openapi: "3.1.0",
+  openapi: "3.0.3",
   info: {
     title: `${config.title} — Listener API`,
     version: "1.1.0",
@@ -87,12 +92,18 @@ const spec = {
             name: "limit",
             in: "query",
             schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
-            description: "Max results to return.",
+            description: "Max results to return per page.",
+          },
+          {
+            name: "offset",
+            in: "query",
+            schema: { type: "integer", minimum: 0, maximum: 10000, default: 0 },
+            description: "Number of results to skip (pagination cursor).",
           },
         ],
         responses: {
           "200": {
-            description: "Ranked search results.",
+            description: "Ranked search results with pagination metadata.",
             headers: rateLimitResponseHeaders(),
             content: {
               "application/json": {
@@ -407,8 +418,11 @@ const spec = {
           "200": {
             description: "Linkset of API references.",
             headers: rateLimitResponseHeaders(),
+            // Use the bare media type as the key — parameterised media type
+            // keys (`;profile="..."`) confuse a lot of OpenAPI parsers. The
+            // RFC 9727 profile is still advertised via the Link header.
             content: {
-              'application/linkset+json;profile="https://www.rfc-editor.org/info/rfc9727"': {
+              "application/linkset+json": {
                 schema: { $ref: "#/components/schemas/ApiCatalog" },
               },
             },
@@ -512,17 +526,21 @@ const spec = {
           duration: { type: "string" },
           url: { type: "string", format: "uri" },
           audio: { type: "string", format: "uri" },
-          transcript: { type: ["string", "null"], format: "uri" },
+          transcript: { type: "string", format: "uri", nullable: true },
           score: { type: "number" },
           snippet: { type: "string" },
         },
       },
       SearchResponse: {
         type: "object",
-        required: ["query", "count", "results"],
+        required: ["query", "count", "total", "offset", "limit", "has_more", "results"],
         properties: {
           query: { type: "string" },
-          count: { type: "integer" },
+          count: { type: "integer", description: "Results in this page." },
+          total: { type: "integer", description: "Total matches across all pages." },
+          offset: { type: "integer", description: "Echoed offset (pagination cursor)." },
+          limit: { type: "integer", description: "Echoed limit." },
+          has_more: { type: "boolean", description: "True if more pages remain." },
           took_ms: { type: "integer" },
           results: { type: "array", items: { $ref: "#/components/schemas/SearchResult" } },
         },
@@ -569,7 +587,8 @@ const spec = {
           language: { type: "string" },
           episodeCount: { type: "integer" },
           latestEpisode: {
-            type: ["object", "null"],
+            type: "object",
+            nullable: true,
             properties: {
               id: { type: "integer" },
               title: { type: "string" },
@@ -638,7 +657,7 @@ const spec = {
         required: ["jsonrpc", "method"],
         properties: {
           jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { oneOf: [{ type: "integer" }, { type: "string" }, { type: "null" }] },
+          id: { oneOf: [{ type: "integer" }, { type: "string" }], nullable: true },
           method: { type: "string" },
           params: { type: "object" },
         },
@@ -648,7 +667,7 @@ const spec = {
         required: ["jsonrpc"],
         properties: {
           jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { oneOf: [{ type: "integer" }, { type: "string" }, { type: "null" }] },
+          id: { oneOf: [{ type: "integer" }, { type: "string" }], nullable: true },
           result: {},
           error: {
             type: "object",

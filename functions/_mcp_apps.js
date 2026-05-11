@@ -247,7 +247,7 @@ export function buildUiResource(uri, baseUrl) {
     const query = (params.get("q") || params.get("query") || "").trim();
     const limit = Math.min(20, Math.max(1, parseInt(params.get("limit") || "5", 10) || 5));
     if (!query) return wrapDocument("Search", `<div class="coil-card"><h3>Search</h3><p class="coil-empty">Pass a query: ui://search?q=&lt;your+question&gt;</p></div>`);
-    const results = searchEpisodes(query, { limit, baseUrl });
+    const { results } = searchEpisodes(query, { limit, baseUrl });
     return wrapDocument(`Search: ${query}`, searchResultsCard(query, results, baseUrl));
   }
 

@@ -47,9 +47,9 @@ function buildSnippet(text, tokens, maxLen = 220) {
   return snippet.replace(/\s+/g, " ").trim();
 }
 
-export function searchEpisodes(query, { limit = 10, baseUrl = "" } = {}) {
+export function searchEpisodes(query, { limit = 10, offset = 0, baseUrl = "" } = {}) {
   const tokens = tokenize(query);
-  if (!tokens.length) return [];
+  if (!tokens.length) return { results: [], total: 0 };
 
   const scored = [];
   for (const ep of episodes) {
@@ -83,7 +83,7 @@ export function searchEpisodes(query, { limit = 10, baseUrl = "" } = {}) {
     }
   }
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  return { results: scored.slice(offset, offset + limit), total: scored.length };
 }
 
 export function summarizeEpisode(ep, baseUrl = "") {

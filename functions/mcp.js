@@ -177,8 +177,8 @@ function callTool(name, args, baseUrl) {
       const query = String(args.query || "").trim();
       const limit = Math.min(50, Math.max(1, Number(args.limit) || 10));
       if (!query) throw new Error("Tell us what to search for: pass `query`.");
-      const results = searchEpisodes(query, { limit, baseUrl });
-      return { query, count: results.length, results };
+      const { results, total } = searchEpisodes(query, { limit, baseUrl });
+      return { query, count: results.length, total, results };
     }
     case "get_episode": {
       const id = Number(args.id);

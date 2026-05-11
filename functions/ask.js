@@ -125,7 +125,7 @@ async function handleAsk(request) {
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
   const t0 = Date.now();
-  const results = searchEpisodes(query, { limit, baseUrl });
+  const { results } = searchEpisodes(query, { limit, baseUrl });
   const took_ms = Date.now() - t0;
 
   return wantsSse(request)

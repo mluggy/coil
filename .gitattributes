@@ -1,6 +1,8 @@
 # LFS tracking for audio files
+# MP3s are canonical on R2 and never committed; only WAVs are LFS-tracked
+# (the intro/outro bumpers, plus the short-lived episode WAV that
+# daily-digest hands off to the pipeline for conversion).
 *.wav filter=lfs diff=lfs merge=lfs -text
-*.mp3 filter=lfs diff=lfs merge=lfs -text
 
 # ─── Frozen files (user-owned) ──────────────────────────────
 # These files ship at v1.0 and are never edited upstream again.

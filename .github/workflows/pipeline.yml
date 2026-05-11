@@ -4,13 +4,22 @@ on:
   push:
     branches: ['*']
   workflow_dispatch:
+  # Forks running a Daily Digest workflow push with the default GITHUB_TOKEN,
+  # which by design does NOT fire the push event (anti-recursion). Listen for
+  # its completion so the pipeline still auto-runs. Dormant in forks that
+  # don't have a "Daily Digest" workflow.
+  workflow_run:
+    workflows: ['Daily Digest']
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   process:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+      && !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
 
     steps:
@@ -96,8 +105,9 @@ jobs:
           git config user.email "coil[bot]@users.noreply.github.com"
           # Use nullglob so missing extensions (e.g. transcribe=false → no .srt
           # yet, or a fresh fork with no episodes) don't fatally stop the job.
+          # MP3s are uploaded to R2 (canonical) and gitignored — never committed.
           shopt -s nullglob
-          files=(episodes/*.mp3 episodes/*.srt episodes/*.txt episodes/*.png episodes/*.jpg)
+          files=(episodes/*.srt episodes/*.txt episodes/*.png episodes/*.jpg)
           shopt -u nullglob
           git add episodes/episodes.yaml
           [ -f episodes/rss.xml ] && git add episodes/rss.xml

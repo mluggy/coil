@@ -92,4 +92,7 @@ public/.well-known/openid-configuration
 public/.well-known/x402/
 public/.well-known/discovery/
 
+# Generated MP3s — uploaded to R2, never committed
+episodes/*.mp3
+
 wrangler.local.toml

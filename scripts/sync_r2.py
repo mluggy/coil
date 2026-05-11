@@ -21,6 +21,12 @@ EXTENSIONS = {
     ".xml": "application/rss+xml",
 }
 
+# When a fork flips `cover` between png and jpg, the OG generator starts
+# emitting the new extension but R2 keeps the old keys forever — turning into
+# 8MB orphan PNGs alongside the live 800KB JPGs. After each image upload we
+# delete the opposite-format key so old orphans get cleaned up on next deploy.
+OPPOSITE_IMG_EXT = {".jpg": ".png", ".png": ".jpg"}
+
 # Guardrail: an LFS smudge that silently failed (e.g. bandwidth quota
 # exhausted) leaves the working tree with 130-byte pointer text where the
 # real binary should be. Uploading that text to R2 overwrites the real
@@ -102,6 +108,15 @@ def main():
 
             s3.upload_file(local_path, bucket, key, ExtraArgs={"ContentType": content_type})
             print(key)
+            # Prune the opposite image format (e.g. uploaded s1e1.jpg → drop
+            # any leftover s1e1.png). apple-touch-icon.png stays put — it's
+            # never tracked here.
+            if ext in OPPOSITE_IMG_EXT:
+                stale_key = os.path.splitext(key)[0] + OPPOSITE_IMG_EXT[ext]
+                try:
+                    s3.delete_object(Bucket=bucket, Key=stale_key)
+                except botocore.exceptions.ClientError:
+                    pass
         except Exception as exc:
             failures += 1
             print(f"Error uploading {key}: {exc}", file=sys.stderr)

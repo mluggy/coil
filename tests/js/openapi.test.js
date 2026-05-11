@@ -20,8 +20,8 @@ describe("/.well-known/openapi.json", () => {
     spec = JSON.parse(readFileSync("public/.well-known/openapi.json", "utf8"));
   });
 
-  it("declares OpenAPI 3.1.x", () => {
-    expect(spec.openapi).toMatch(/^3\.1/);
+  it("declares OpenAPI 3.0.x", () => {
+    expect(spec.openapi).toMatch(/^3\.0/);
   });
 
   it("declares info.title + info.version + info.description", () => {

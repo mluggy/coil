@@ -32,15 +32,15 @@ const notModifiedResponse = {
   "304": { $ref: "#/components/responses/NotModified" },
 };
 
-// OpenAPI 3.1.0 — matches the JSON Schema 2020-12 dialect that modern
-// agent audits (orank, ChatGPT/Claude/Gemini function-calling converters)
-// validate against. The earlier 3.0.3 spec failed strict validation: 3.0
-// rejects `oneOf + nullable: true` (required for JsonRpc id), forcing
-// either a malformed schema or a partial-parse downgrade. 3.1's
-// `type: [..., "null"]` is the clean fix and lets static analyzers
-// extract every operation's response schema.
+// OpenAPI 3.0.3. We trialled 3.1.0 (matches JSON Schema 2020-12) but
+// orank's `api-response-quality` parser is 3.0-only — type-arrays like
+// `["string", "null"]` make it bail with "could not fully parse" while
+// its function-calling-compat path (a separate 3.1-aware analyzer) still
+// works. Sticking to 3.0.3 lets both paths succeed; the old `oneOf +
+// nullable: true` 3.0-invalidity is avoided by spelling out null cases
+// per subschema (or omitting the null case where description suffices).
 const spec = {
-  openapi: "3.1.0",
+  openapi: "3.0.3",
   info: {
     title: `${config.title} — Listener API`,
     version: "1.1.0",
@@ -620,7 +620,7 @@ const spec = {
           duration: { type: "string" },
           url: { type: "string", format: "uri" },
           audio: { type: "string", format: "uri" },
-          transcript: { type: ["string", "null"], format: "uri" },
+          transcript: { type: "string", format: "uri", nullable: true },
           score: { type: "number" },
           snippet: { type: "string" },
         },
@@ -681,7 +681,8 @@ const spec = {
           language: { type: "string" },
           episodeCount: { type: "integer" },
           latestEpisode: {
-            type: ["object", "null"],
+            type: "object",
+            nullable: true,
             properties: {
               id: { type: "integer" },
               title: { type: "string" },
@@ -750,12 +751,17 @@ const spec = {
         required: ["jsonrpc", "method"],
         properties: {
           jsonrpc: { type: "string", enum: ["2.0"] },
-          // JSON-RPC 2.0 ids are int | string | null. 3.1's typed-null union
-          // is the function-calling-compatible spelling (3.0's `nullable +
-          // oneOf` is invalid and trips strict parsers).
-          id: { type: ["integer", "string", "null"], description: "JSON-RPC request id; echoed in the response." },
+          // JSON-RPC 2.0 ids are int | string | null. OpenAPI 3.0 has no
+          // clean spelling for that union (combining `oneOf` with
+          // `nullable: true` is invalid). Use `oneOf` for the two typed
+          // cases; document the null case so docs renderers and 3.0
+          // parsers don't choke on it.
+          id: {
+            description: "JSON-RPC request id; echoed in the response. May also be JSON null per the JSON-RPC 2.0 spec.",
+            oneOf: [{ type: "integer" }, { type: "string" }],
+          },
           method: { type: "string", description: "Method name (e.g. initialize, tools/list, tools/call)." },
-          params: { type: "object", description: "Method-specific parameter object.", additionalProperties: true },
+          params: { type: "object", description: "Method-specific parameter object." },
         },
       },
       JsonRpcResponse: {
@@ -763,17 +769,14 @@ const spec = {
         required: ["jsonrpc"],
         properties: {
           jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { type: ["integer", "string", "null"], description: "Echoes the request id." },
-          // JSON-RPC 2.0 leaves `result` shape method-dependent; document the
-          // permitted JSON-value types explicitly so strict parsers don't see
-          // an empty schema and bail.
-          // JSON-RPC 2.0 leaves `result` shape method-dependent; the JSON
-          // Schema 2020-12 way to say "any JSON value" is a schema with no
-          // `type`. Using a multi-type array including "array" requires a
-          // sibling `items` and trips array-items lint rules.
-          result: {
-            description: "Method-specific success payload (shape depends on method).",
+          id: {
+            description: "Echoes the request id. May also be JSON null when the request id was null.",
+            oneOf: [{ type: "integer" }, { type: "string" }],
           },
+          // JSON-RPC leaves `result` method-dependent. An empty schema
+          // means "any JSON value" — `description` keeps doc renderers
+          // happy without locking the shape down.
+          result: { description: "Method-specific success payload (shape depends on method)." },
           error: {
             type: "object",
             required: ["code", "message"],

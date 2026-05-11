@@ -475,7 +475,18 @@ const spec = {
         description: "Same JSON-RPC endpoint as /mcp; agents that probe well-known can initialize directly.",
         operationId: "callMcpWellKnown",
         tags: ["mcp"],
-        requestBody: { $ref: "#/components/requestBodies/JsonRpcBody" },
+        // Inlined (instead of `$ref: "#/components/requestBodies/..."`).
+        // Some scanners can't dereference requestBody refs and bail with
+        // "could not fully parse".
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/JsonRpcRequest" },
+              example: { jsonrpc: "2.0", id: 1, method: "initialize" },
+            },
+          },
+        },
         responses: {
           "200": {
             description: "JSON-RPC 2.0 response.",
@@ -820,17 +831,6 @@ const spec = {
               hint: { type: "string", description: "Actionable next step (URL or example)." },
               docs_url: { type: "string", format: "uri" },
             },
-          },
-        },
-      },
-    },
-    requestBodies: {
-      JsonRpcBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/JsonRpcRequest" },
-            example: { jsonrpc: "2.0", id: 1, method: "initialize" },
           },
         },
       },

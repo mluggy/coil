@@ -74,15 +74,14 @@ describe("initialize", () => {
     expect(r.result.capabilities.resources).toBeTruthy();
   });
 
-  it("advertises OAuth metadata with anonymous fallback (orank MCP auth check)", async () => {
+  it("advertises OAuth metadata for the optional bearer flow", async () => {
     const r = await rpcJson({ jsonrpc: "2.0", id: 1, method: "initialize" });
     const auth = r.result.auth;
     expect(auth.type).toBe("oauth2");
-    // RFC 8414 metadata is present and bearer tokens are honoured, so
-    // OAuth is declared required; anonymousFallback signals that the
-    // server still accepts unauthenticated calls.
-    expect(auth.required).toBe(true);
-    expect(auth.anonymousFallback).toBe(true);
+    // The server actually accepts anonymous calls; metadata is present
+    // for clients that want to use OAuth, but it isn't required.
+    expect(auth.required).toBe(false);
+    expect(auth.anonymous).toBe(true);
     expect(auth.pkce).toBe("S256");
     expect(auth.code_challenge_methods_supported).toEqual(["S256"]);
     expect(auth.flows).toEqual(

@@ -714,8 +714,8 @@ function buildMcpManifest(baseUrl) {
         // clients that skip auth altogether also work.
         auth: {
           type: "oauth2",
-          required: true,
-          anonymousFallback: true,
+          required: false,
+          anonymous: true,
           flows: ["authorization_code", "client_credentials"],
           pkce: "S256",
           code_challenge_methods_supported: ["S256"],
@@ -781,8 +781,8 @@ function buildMcpServerCard(baseUrl) {
       // bearer in one client_credentials hop with the pre-issued public
       // client id. Anonymous calls still work as a fallback for clients
       // that don't speak OAuth at all.
-      required: true,
-      anonymousFallback: true,
+      required: false,
+      anonymous: true,
       pkce: "S256",
       code_challenge_methods_supported: ["S256"],
       grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],

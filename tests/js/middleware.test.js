@@ -178,8 +178,8 @@ describe("/.well-known/mcp dispatch", () => {
     expect(body.protocolVersion).toBeTruthy();
     expect(body.transport).toBe("streamable-http");
     expect(body.auth.type).toBe("oauth2");
-    expect(body.auth.required).toBe(true);
-    expect(body.auth.anonymousFallback).toBe(true);
+    expect(body.auth.required).toBe(false);
+    expect(body.auth.anonymous).toBe(true);
     expect(body.auth.pkce).toBe("S256");
     expect(body.auth.code_challenge_methods_supported).toEqual(["S256"]);
   });

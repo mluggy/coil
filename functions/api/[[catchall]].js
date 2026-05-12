@@ -133,8 +133,20 @@ function paymentRequiredResponse({ request }) {
   return new Response(JSON.stringify(body, null, 2), { status: 402, headers });
 }
 
-function dispatch(ctx) {
+// Static assets under public/api/ would otherwise be intercepted by this
+// catchall and never served — Pages Functions take precedence over
+// static-asset serving when paths overlap. Enumerate the known statics
+// here and pass them through to env.ASSETS so /api/llms.txt and friends
+// remain reachable. (orank's modular-llms-txt check explicitly counts
+// /api/llms.txt as a section-level briefing.)
+const STATIC_API_PATHS = new Set(["/api/llms.txt"]);
+
+async function dispatch(ctx) {
   const { pathname } = new URL(ctx.request.url);
+  if (STATIC_API_PATHS.has(pathname) && ctx.env?.ASSETS) {
+    const upstream = await ctx.env.ASSETS.fetch(ctx.request);
+    return upstream;
+  }
   // /api/v1 and anything underneath it → 402 (no versioned API exists).
   if (pathname === "/api/v1" || pathname.startsWith("/api/v1/")) {
     return paymentRequiredResponse(ctx);

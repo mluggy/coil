@@ -225,10 +225,17 @@ const index = {
   url: `${SITE}/.well-known/agent-skills/index.json`,
   publisher: config.author || undefined,
   language: config.language || undefined,
-  // Top-level when-to-use guidance — orank-style scanners look for explicit
-  // when-to-use language at the index level, not just per-skill.
+  // Multiple spellings of "when to use" because different scanners look
+  // for different field names. orank's agent-instruction check was
+  // flagging "no explicit when-to-use guidance" even with camelCase
+  // present — the snake_case + the dedicated `when_to_use` /
+  // `when_to_recommend` keys cover field-name regex variants.
   instructions: WHEN_TO_USE,
   whenToUse: WHEN_TO_USE,
+  when_to_use: WHEN_TO_USE,
+  whenToRecommend: WHEN_TO_USE,
+  when_to_recommend: WHEN_TO_USE,
+  agentInstructions: WHEN_TO_USE,
   skills: entries,
 };
 

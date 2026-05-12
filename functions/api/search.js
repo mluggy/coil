@@ -81,6 +81,31 @@ export async function onRequestGet({ request }) {
     const took_ms = Date.now() - t0;
     const has_more = offset + results.length < total;
 
+    // Successful query that matched nothing: still 200 (zero results is
+    // *not* an error in REST), but include a structured `info` envelope
+    // that mirrors the error envelope (code, message, hint, docs_url).
+    // orank's error-recovery probe was rewording empty arrays as a gap;
+    // the structured signal closes that documented-vs-actual gap without
+    // pretending zero-match is an HTTP error.
+    if (results.length === 0) {
+      return apiOk({
+        query: q,
+        count: 0,
+        total: 0,
+        offset,
+        limit,
+        has_more: false,
+        took_ms,
+        results: [],
+        info: {
+          code: "no_results",
+          message: `No episodes match "${q}".`,
+          hint: "/api/search?q=ai — try a broader keyword, or browse /episodes.json for the full catalog.",
+          docs_url: "/api/llms.txt",
+        },
+      });
+    }
+
     return apiOk({ query: q, count: results.length, total, offset, limit, has_more, took_ms, results });
   } catch (e) {
     return errors.internal(e?.message);

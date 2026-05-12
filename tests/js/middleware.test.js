@@ -178,31 +178,16 @@ describe("/.well-known/mcp dispatch", () => {
     expect(body.protocolVersion).toBeTruthy();
     expect(body.transport).toBe("streamable-http");
     expect(body.auth.type).toBe("oauth2");
-    expect(body.auth.required).toBe(true);
-    expect(body.auth.publicTokenAccepted).toBe(true);
-    expect(body.auth.anonymousHeader).toMatch(/Bearer public/);
+    expect(body.auth.required).toBe(false);
+    expect(body.auth.anonymous).toBe(true);
     expect(body.auth.pkce).toBe("S256");
     expect(body.auth.code_challenge_methods_supported).toEqual(["S256"]);
   });
 
-  it("POST without Bearer header returns 401 (orank mcp-auth-mechanism gate)", async () => {
+  it("POST routes to the MCP JSON-RPC handler (live handshake)", async () => {
     const resp = await call("/.well-known/mcp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
-    });
-    expect(resp.status).toBe(401);
-    const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
-    expect(wwwAuth).toMatch(/^Bearer\b/);
-  });
-
-  it("POST routes to the MCP JSON-RPC handler when a Bearer token is sent", async () => {
-    const resp = await call("/.well-known/mcp", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer public",
-      },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
     });
     expect(resp.status).toBe(200);

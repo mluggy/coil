@@ -75,12 +75,9 @@ describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
     expect(m.bearer_methods_supported).toContain("header");
   });
 
-  it("flags auth scope via x-auth-required: mcp-only + Bearer mode", () => {
-    // /mcp returns 401 without a Bearer header; all other endpoints
-    // remain zero-auth. The "mcp-only" sentinel keeps this explicit.
-    expect(m["x-auth-required"]).toBe("mcp-only");
-    expect(m["x-auth-modes"]).toEqual(["bearer"]);
-    expect(m["x-public-token"]).toBe("public");
+  it("flags auth as optional via x-auth-required: false", () => {
+    expect(m["x-auth-required"]).toBe(false);
+    expect(m["x-auth-modes"]).toEqual(expect.arrayContaining(["anonymous", "bearer"]));
   });
 });
 

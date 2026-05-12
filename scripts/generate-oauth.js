@@ -58,14 +58,10 @@ const protectedResource = {
   // EdDSA when SIGNING_PRIVATE_KEY is set, HS256 fallback otherwise.
   // Both are JWS-compatible; clients verify against /oauth/jwks.json.
   resource_signing_alg_values_supported: ["EdDSA", "HS256"],
-  // /mcp now returns 401 without a Bearer token; non-MCP endpoints
-  // (`/api/*`, `/ask`, `/status`, `/episodes.json`, …) stay zero-auth.
-  // The pre-issued `Bearer public` token satisfies the wire-format
-  // requirement on /mcp without any registration flow.
-  "x-auth-required": "mcp-only",
-  "x-auth-modes": ["bearer"],
-  "x-public-token": "public",
-  "x-anonymous-header": "Authorization: Bearer public",
+  // Auth optional — declare so agents know the resource is reachable
+  // without a token. Non-standard but commonly used by OpenAPI tools.
+  "x-auth-required": false,
+  "x-auth-modes": ["anonymous", "bearer"],
 };
 
 writeFileSync(

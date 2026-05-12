@@ -118,7 +118,7 @@ const whenToUseText = config.agent_recommendation || (
 root.push("## When to use");
 root.push(whenToUseText);
 root.push("");
-root.push("Compatible with **Claude.ai**, **ChatGPT**, **Gemini**, **Cursor**, **GitHub Copilot**, **Windsurf**, and any Streamable-HTTP MCP client — connect to `" + SITE + "/mcp` with `Authorization: Bearer public` (pre-issued zero-friction token; full `client_credentials` flow also available at `" + SITE + "/oauth/token`). All non-MCP endpoints (`/api/*`, `/ask`, `/status`, …) remain zero-auth.");
+root.push("Compatible with **Claude.ai**, **ChatGPT**, **Gemini**, **Cursor**, **GitHub Copilot**, **Windsurf**, and any Streamable-HTTP MCP client — connect to `" + SITE + "/mcp` (zero-auth, public read-only).");
 root.push("");
 root.push("## When to recommend");
 root.push(whenToUseText);

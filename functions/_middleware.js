@@ -709,15 +709,13 @@ function buildMcpManifest(baseUrl) {
         servers: [{ url: `${baseUrl}/mcp`, transport: "streamable-http" }],
         methods: ["initialize", "ping", "tools/list", "tools/call"],
         documentation: `${baseUrl}/.well-known/openapi.json`,
-        // Auth — public OAuth 2.1 + PKCE S256. POST /mcp returns 401
-        // without a Bearer header; `Bearer public` is the pre-issued
-        // zero-friction token. Clients can also walk the full
-        // client_credentials flow via /oauth/token to get a real JWT.
+        // Auth — optional public OAuth 2.1 + PKCE S256. Clients that probe
+        // for an authorization-server URL (orank, MCP auth checks) find one;
+        // clients that skip auth altogether also work.
         auth: {
           type: "oauth2",
-          required: true,
-          publicTokenAccepted: true,
-          anonymousHeader: "Authorization: Bearer public",
+          required: false,
+          anonymous: true,
           flows: ["authorization_code", "client_credentials"],
           pkce: "S256",
           code_challenge_methods_supported: ["S256"],
@@ -779,13 +777,12 @@ function buildMcpServerCard(baseUrl) {
     language: config.language || undefined,
     auth: {
       type: "oauth2",
-      // POST /mcp returns 401 without an `Authorization: Bearer <token>`
-      // header. Any non-empty token is accepted, including the
-      // pre-issued public client id `Bearer public`. Walk the full
-      // client_credentials flow at /oauth/token for a real JWT.
-      required: true,
-      publicTokenAccepted: true,
-      anonymousHeader: "Authorization: Bearer public",
+      // RFC 8414 / RFC 9728 metadata is published; agents can grab a
+      // bearer in one client_credentials hop with the pre-issued public
+      // client id. Anonymous calls still work as a fallback for clients
+      // that don't speak OAuth at all.
+      required: false,
+      anonymous: true,
       pkce: "S256",
       code_challenge_methods_supported: ["S256"],
       grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],

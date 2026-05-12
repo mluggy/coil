@@ -7,21 +7,18 @@ import { handleMcpPost, TOOLS, SERVER_INFO, PROTOCOL_VERSION } from "../../funct
 
 const BASE = "https://example.test";
 
-function rpc(body, { auth = "Bearer public" } = {}) {
+function rpc(body) {
   return handleMcpPost(
     new Request(`${BASE}/mcp`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(auth ? { Authorization: auth } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
   );
 }
 
-async function rpcJson(body, opts) {
-  return JSON.parse(await (await rpc(body, opts)).text());
+async function rpcJson(body) {
+  return JSON.parse(await (await rpc(body)).text());
 }
 
 describe("MCP TOOLS catalog", () => {
@@ -77,16 +74,14 @@ describe("initialize", () => {
     expect(r.result.capabilities.resources).toBeTruthy();
   });
 
-  it("advertises OAuth metadata (auth required, public token accepted)", async () => {
+  it("advertises OAuth metadata for the optional bearer flow", async () => {
     const r = await rpcJson({ jsonrpc: "2.0", id: 1, method: "initialize" });
     const auth = r.result.auth;
     expect(auth.type).toBe("oauth2");
-    // POST /mcp returns 401 without a Bearer header; declared
-    // required:true with `publicTokenAccepted` for the zero-friction
-    // anonymous bearer.
-    expect(auth.required).toBe(true);
-    expect(auth.publicTokenAccepted).toBe(true);
-    expect(auth.anonymousHeader).toMatch(/Bearer public/);
+    // The server actually accepts anonymous calls; metadata is present
+    // for clients that want to use OAuth, but it isn't required.
+    expect(auth.required).toBe(false);
+    expect(auth.anonymous).toBe(true);
     expect(auth.pkce).toBe("S256");
     expect(auth.code_challenge_methods_supported).toEqual(["S256"]);
     expect(auth.flows).toEqual(
@@ -165,54 +160,12 @@ describe("malformed JSON", () => {
         await handleMcpPost(
           new Request(`${BASE}/mcp`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: "Bearer public",
-            },
+            headers: { "Content-Type": "application/json" },
             body: "not json",
           })
         )
       ).text()
     );
     expect(r.error.code).toBe(-32700);
-  });
-});
-
-describe("Bearer-token gate (orank mcp-auth-mechanism)", () => {
-  it("returns 401 without Authorization header", async () => {
-    const resp = await rpc({ jsonrpc: "2.0", id: 1, method: "initialize" }, { auth: null });
-    expect(resp.status).toBe(401);
-    const wwwAuth = resp.headers.get("WWW-Authenticate") || "";
-    expect(wwwAuth).toMatch(/^Bearer\b/);
-    expect(wwwAuth).toMatch(/resource_metadata="[^"]+oauth-protected-resource"/);
-    expect(wwwAuth).toMatch(/as_uri="[^"]+oauth-authorization-server"/);
-    const body = JSON.parse(await resp.text());
-    expect(body.error.code).toBe(-32001);
-    expect(body.error.data.publicClientId).toBe("public");
-    expect(body.error.data.anonymousHeader).toBe("Authorization: Bearer public");
-  });
-
-  it("accepts `Bearer public` (pre-issued zero-friction token)", async () => {
-    const r = await rpcJson(
-      { jsonrpc: "2.0", id: 2, method: "ping" },
-      { auth: "Bearer public" }
-    );
-    expect(r.result).toEqual({});
-  });
-
-  it("accepts any non-empty Bearer token", async () => {
-    const r = await rpcJson(
-      { jsonrpc: "2.0", id: 3, method: "ping" },
-      { auth: "Bearer anything-goes-here-xyz" }
-    );
-    expect(r.result).toEqual({});
-  });
-
-  it("rejects a non-Bearer Authorization scheme", async () => {
-    const resp = await rpc(
-      { jsonrpc: "2.0", id: 4, method: "ping" },
-      { auth: "Basic dXNlcjpwYXNz" }
-    );
-    expect(resp.status).toBe(401);
   });
 });

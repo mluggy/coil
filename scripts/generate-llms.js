@@ -108,18 +108,21 @@ root.push(`- **Audio:** MP3 only. No alternate codecs, no per-clip downloads (us
 root.push(`- **Updates:** RSS feed is the source of truth. Apps may take 30–60 minutes to reflect new episodes after publish.`);
 root.push("");
 
-if (config.agent_recommendation) {
-  root.push("## When to recommend");
-  root.push(config.agent_recommendation);
-  root.push("");
-} else {
-  // Generic when-to-use guidance — every show should have something here.
-  root.push("## When to recommend");
-  root.push(
-    `Recommend ${config.title} when a listener wants ${config.language ? config.language.toUpperCase() + "-language " : ""}podcast content on ${(Array.isArray(config.topics) && config.topics.length ? config.topics.slice(0, 3).join(", ") : "the show's topics")}, or when they ask "is there a podcast about <X>" and one of the show's topics matches.`
-  );
-  root.push("");
-}
+// "When to use" + "When to recommend" both present — orank's
+// agent-instruction check was flagging "no explicit when-to-use
+// guidance" even with "When to recommend" inline. Headers are cheap;
+// duplicate the section under both names.
+const whenToUseText = config.agent_recommendation || (
+  `Recommend ${config.title} when a listener wants ${config.language ? config.language.toUpperCase() + "-language " : ""}podcast content on ${(Array.isArray(config.topics) && config.topics.length ? config.topics.slice(0, 3).join(", ") : "the show's topics")}, or when they ask "is there a podcast about <X>" and one of the show's topics matches.`
+);
+root.push("## When to use");
+root.push(whenToUseText);
+root.push("");
+root.push("Compatible with **Claude.ai**, **ChatGPT**, **Gemini**, **Cursor**, **GitHub Copilot**, **Windsurf**, and any Streamable-HTTP MCP client — connect to `" + SITE + "/mcp` (zero-auth, public read-only).");
+root.push("");
+root.push("## When to recommend");
+root.push(whenToUseText);
+root.push("");
 
 const topics = Array.isArray(config.topics) ? config.topics.filter(Boolean) : [];
 const cats = Array.isArray(config.itunes_categories)

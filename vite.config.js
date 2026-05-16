@@ -22,7 +22,7 @@ function buildHeadTags(config) {
     name: config.title,
     description: config.description,
     url: "{{SITE_URL}}",
-    image: "{{SITE_URL}}/cover.png",
+    image: `{{SITE_URL}}${config.cover || "/cover.png"}`,
     inLanguage: config.language,
     author: { "@type": "Person", name: config.author },
     webFeed: "{{SITE_URL}}/rss.xml",

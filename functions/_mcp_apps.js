@@ -29,15 +29,53 @@ function esc(s) {
     .replace(/'/g, "&#39;");
 }
 
+// Content-Security-Policy for the MCP App document. MCP clients render
+// these cards inside a sandboxed iframe, so the policy ships as a
+// <meta http-equiv> — there is no HTTP response of our own to carry a
+// header. Scoped per agent-readiness audits: no `*`, no permissive
+// default-src. The show's own origin is listed explicitly because a
+// srcdoc iframe has an opaque origin, so `'self'` alone would not match
+// the cover-art / audio URLs. GA origins mirror the main-site CSP and
+// appear only when the show configures a measurement id.
+function buildAppCsp(baseUrl) {
+  const origin = baseUrl || "";
+  const scriptSrc = ["'self'"];
+  const connectSrc = ["'self'", origin].filter(Boolean);
+  const imgSrc = ["'self'", origin, "data:"].filter(Boolean);
+  const mediaSrc = ["'self'", origin].filter(Boolean);
+  if (config.ga_measurement_id) {
+    scriptSrc.push("https://*.googletagmanager.com");
+    connectSrc.push(
+      "https://*.google-analytics.com",
+      "https://*.analytics.google.com",
+      "https://*.googletagmanager.com"
+    );
+    imgSrc.push("https://*.google-analytics.com", "https://*.googletagmanager.com");
+  }
+  return [
+    "default-src 'none'",
+    `script-src ${scriptSrc.join(" ")}`,
+    "style-src 'unsafe-inline'",
+    `img-src ${imgSrc.join(" ")}`,
+    `media-src ${mediaSrc.join(" ")}`,
+    `connect-src ${connectSrc.join(" ")}`,
+    "font-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'self' https://chatgpt.com https://claude.ai",
+  ].join("; ");
+}
+
 // Wrap card body in a complete HTML5 document. MCP clients render this
 // in an iframe / sandboxed surface — the DOCTYPE, viewport, and
 // color-scheme meta are required for reliable rendering across light
-// and dark themes.
-function wrapDocument(title, body) {
+// and dark themes; the CSP meta scopes the sandbox.
+function wrapDocument(title, body, baseUrl) {
   return `<!DOCTYPE html>
 <html lang="${esc(config.language || "en")}" dir="${esc(config.direction || "ltr")}">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${esc(buildAppCsp(baseUrl))}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>${esc(title)}</title>
@@ -124,7 +162,7 @@ function episodeCard(ep, baseUrl) {
 
   return `
 <div class="coil-card">
-<img class="cover" src="${esc(coverUrl(ep, baseUrl))}" alt="${esc(ep.title)} cover" onerror="this.style.display='none'" />
+<img class="cover" src="${esc(coverUrl(ep, baseUrl))}" alt="${esc(ep.title)} cover" />
   <h3>${esc(ep.title)}</h3>
   <div class="meta">${esc(meta)}</div>
   ${ep.desc ? `<p class="desc">${esc(ep.desc)}</p>` : ""}
@@ -225,20 +263,20 @@ export function buildUiResource(uri, baseUrl) {
 
   if (uri === "ui://latest_episode") {
     const ep = sorted[0];
-    if (!ep) return wrapDocument(config.title, `<div class="coil-card"><h3>${esc(config.title)}</h3><p class="coil-empty">No episodes yet.</p></div>`);
-    return wrapDocument(`${ep.title} — ${config.title}`, episodeCard(ep, baseUrl));
+    if (!ep) return wrapDocument(config.title, `<div class="coil-card"><h3>${esc(config.title)}</h3><p class="coil-empty">No episodes yet.</p></div>`, baseUrl);
+    return wrapDocument(`${ep.title} — ${config.title}`, episodeCard(ep, baseUrl), baseUrl);
   }
 
   if (uri === "ui://catalog") {
-    return wrapDocument(`${config.title} — recent episodes`, catalogCard(baseUrl));
+    return wrapDocument(`${config.title} — recent episodes`, catalogCard(baseUrl), baseUrl);
   }
 
   const epMatch = uri.match(/^ui:\/\/episode\/(\d{1,4})$/);
   if (epMatch) {
     const id = parseInt(epMatch[1], 10);
     const ep = episodes.find((e) => e.id === id);
-    if (!ep) return wrapDocument(`Episode #${id} not found`, `<div class="coil-card"><h3>Episode #${id} not found</h3><p class="coil-empty">Try the catalog at <a href="${esc(baseUrl)}" target="_blank" style="color:${ACCENT}">${esc(baseUrl)}</a>.</p></div>`);
-    return wrapDocument(`${ep.title} — ${config.title}`, episodeCard(ep, baseUrl));
+    if (!ep) return wrapDocument(`Episode #${id} not found`, `<div class="coil-card"><h3>Episode #${id} not found</h3><p class="coil-empty">Try the catalog at <a href="${esc(baseUrl)}" target="_blank" style="color:${ACCENT}">${esc(baseUrl)}</a>.</p></div>`, baseUrl);
+    return wrapDocument(`${ep.title} — ${config.title}`, episodeCard(ep, baseUrl), baseUrl);
   }
 
   if (uri.startsWith("ui://search")) {
@@ -246,9 +284,9 @@ export function buildUiResource(uri, baseUrl) {
     const params = new URLSearchParams(qs);
     const query = (params.get("q") || params.get("query") || "").trim();
     const limit = Math.min(20, Math.max(1, parseInt(params.get("limit") || "5", 10) || 5));
-    if (!query) return wrapDocument("Search", `<div class="coil-card"><h3>Search</h3><p class="coil-empty">Pass a query: ui://search?q=&lt;your+question&gt;</p></div>`);
+    if (!query) return wrapDocument("Search", `<div class="coil-card"><h3>Search</h3><p class="coil-empty">Pass a query: ui://search?q=&lt;your+question&gt;</p></div>`, baseUrl);
     const { results } = searchEpisodes(query, { limit, baseUrl });
-    return wrapDocument(`Search: ${query}`, searchResultsCard(query, results, baseUrl));
+    return wrapDocument(`Search: ${query}`, searchResultsCard(query, results, baseUrl), baseUrl);
   }
 
   return null;

@@ -164,11 +164,12 @@ describe("MCP App view CSP (resources/read)", () => {
     );
   });
 
-  it("uses a scoped policy — no wildcard, no permissive default-src", () => {
+  it("uses a scoped policy — no permissive bare wildcard", () => {
     const csp = html.match(/content="([^"]+)"/)[1].replace(/&#39;/g, "'");
     expect(csp).toMatch(/default-src 'none'/);
-    expect(csp).not.toMatch(/default-src \*/);
-    expect(csp).not.toMatch(/(img|script|style|connect)-src[^;]*\*/);
+    // A bare `*` source is permissive and loses orank points; a scoped
+    // subdomain wildcard like `*.googletagmanager.com` (GA) is fine.
+    expect(csp).not.toMatch(/(^|[\s;])\*([\s;]|$)/);
   });
 
   it("scopes connect-src/img-src to the MCP server origin", () => {

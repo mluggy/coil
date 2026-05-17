@@ -65,6 +65,14 @@ const spec = {
     // API never charges; only POST /donate returns HTTP 402.
     "x-payment-info": {
       required: false,
+      // MPP (Machine Payment Protocol) discovery fields — paymentauth.org
+      // draft-payment-discovery-00. intent/method/amount/currency let an
+      // MPP-aware agent transact without a per-vendor integration.
+      intent: "charge",
+      method: "tempo",
+      amount: config.payment?.suggested_amount || "1.00",
+      currency: "USD",
+      availability: "demo-only",
       protocols: ["x402", "mpp"],
       scheme: "stablecoin",
       asset: "USDC",
@@ -227,6 +235,16 @@ const spec = {
           },
         ],
         "x-payment-info": {
+          // MPP (Machine Payment Protocol) discovery — paymentauth.org
+          // draft-payment-discovery-00. intent/method/amount/currency are
+          // the fields an MPP-aware agent reads to transact without a
+          // per-vendor integration. The same voluntary tip is also
+          // payable via x402; the stablecoin specifics ride alongside.
+          intent: "charge",
+          method: "tempo",
+          amount: config.payment?.suggested_amount || "1.00",
+          currency: "USD",
+          availability: "demo-only",
           protocols: ["x402", "mpp"],
           scheme: "stablecoin",
           asset: "USDC",
@@ -234,7 +252,6 @@ const spec = {
           address: config.payment?.usdc_address || "",
           minAmount: config.payment?.min_amount || "0.01",
           suggestedAmount: config.payment?.suggested_amount || "1.00",
-          currency: "USD",
           required: false,
           facilitator: `${SITE}/.well-known/x402/supported`,
           discovery: `${SITE}/.well-known/discovery/resources`,

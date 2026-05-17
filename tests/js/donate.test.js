@@ -88,6 +88,24 @@ describe("POST /donate", () => {
     const mpp = body._meta.alternativePayments.find((m) => m.type === "mpp");
     expect(mpp.asset).toBe("USDC");
     expect(mpp.scheme).toBe("stablecoin");
+    expect(mpp.intent).toBe("charge");
+    expect(mpp.method).toBe("tempo");
+  });
+
+  it("acknowledges an x402 retry (X-Payment header) with 200", async () => {
+    const resp = await call({ method: "POST", headers: { "X-Payment": "demo-x402-payload" } });
+    expect(resp.status).toBe(200);
+    const body = JSON.parse(await resp.text());
+    expect(body.paid).toBe(true);
+    expect(body.protocol).toBe("x402");
+  });
+
+  it("acknowledges an MPP retry (Payment header) with 200", async () => {
+    const resp = await call({ method: "POST", headers: { Payment: "demo-mpp-payload" } });
+    expect(resp.status).toBe(200);
+    const body = JSON.parse(await resp.text());
+    expect(body.paid).toBe(true);
+    expect(body.protocol).toBe("mpp");
   });
 
   it("CORS preflight returns 204", async () => {

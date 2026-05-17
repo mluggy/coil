@@ -121,19 +121,23 @@ export async function onRequest({ request }) {
   const info = paymentInfo(baseUrl);
   const requirements = x402PaymentRequirements(baseUrl, info);
 
-  // x402 protocol: if the client returns with an X-Payment header (the
-  // payment payload from a prior 402), acknowledge with 200. We don't
-  // verify on-chain settlement here — that's the facilitator's job — but
-  // matching the protocol shape (200 on retry-with-payment, 402 otherwise)
-  // closes the spec/impl gap that audits flag.
-  const paymentHeader = request.headers.get("X-Payment") || request.headers.get("x-payment");
+  // Payment retry → 200. Both protocols carry the prior-402 payload in a
+  // request header: x402 uses `X-Payment`, MPP (Machine Payment Protocol)
+  // uses `Payment`. We don't verify on-chain settlement here — that's the
+  // facilitator's job — but matching the protocol shape (200 on
+  // retry-with-payment, 402 otherwise) closes the spec/impl gap audits flag.
+  const x402Payment = request.headers.get("X-Payment");
+  const mppPayment = request.headers.get("Payment");
+  const paymentHeader = x402Payment || mppPayment;
   if (paymentHeader) {
+    const protocol = x402Payment ? "x402" : "mpp";
     const ackBody = {
       paid: true,
       settled: false,
+      protocol,
       message: `Thank you for supporting ${config.title || "this podcast"}!`,
       verification: {
-        protocol: "x402",
+        protocol,
         facilitator: `${baseUrl}/.well-known/x402/supported`,
         note: "Receipt acknowledged; on-chain settlement is verified by the facilitator.",
       },
@@ -160,8 +164,11 @@ export async function onRequest({ request }) {
       alternativePayments: [
         {
           // Machine Payment Protocol — same stablecoin rail; advertised
-          // explicitly so MPP-only clients see it.
+          // explicitly so MPP-only clients see it. intent/method/amount/
+          // currency mirror the x-payment-info discovery in /openapi.json.
           type: "mpp",
+          intent: "charge",
+          method: "tempo",
           scheme: "stablecoin",
           asset: info.asset,
           network: info.network,

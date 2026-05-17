@@ -106,6 +106,16 @@ describe("/.well-known/openapi.json", () => {
     expect(ext.required).toBe(false);
   });
 
+  it("/donate x-payment-info carries MPP discovery fields", () => {
+    // MPP payment discovery (paymentauth.org draft-payment-discovery-00):
+    // a payable operation declares intent / method / amount / currency.
+    const ext = spec.paths["/donate"].post["x-payment-info"];
+    expect(ext.intent).toBe("charge");
+    expect(["tempo", "stripe", "lightning", "card"]).toContain(ext.method);
+    expect(ext.amount).toBeTruthy();
+    expect(ext.currency).toBe("USD");
+  });
+
   it("declares top-level info[x-payment-info] (MPP audit signal at info-block)", () => {
     const ext = spec.info["x-payment-info"];
     expect(ext).toBeTruthy();

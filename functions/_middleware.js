@@ -3,6 +3,7 @@ import episodes from "./_episodes.js";
 import config from "./_config.js";
 import { apiHeaders, errors } from "./_api.js";
 import { handleMcpPost, buildMcpGetManifest, TOOLS as MCP_TOOLS, SERVER_INFO as MCP_SERVER_INFO, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION } from "./mcp.js";
+import * as commerce from "./_commerce.js";
 
 const BOTS = /googlebot|google-inspectiontool|bingbot|yandex|baiduspider|twitterbot|facebookexternalhit|linkedinbot|slackbot-linkexpanding|discordbot|whatsapp|telegrambot|applebot|pinterestbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|anthropic-ai|claudebot|ccbot/i;
 
@@ -546,6 +547,9 @@ function buildAgentJson(episode, baseUrl) {
       donate: `${baseUrl}/donate`,
       x402Discovery: `${baseUrl}/.well-known/discovery/resources`,
       x402Supported: `${baseUrl}/.well-known/x402/supported`,
+      ucpDiscovery: `${baseUrl}/.well-known/ucp`,
+      acpDiscovery: `${baseUrl}/.well-known/acp.json`,
+      checkoutSessions: `${baseUrl}/checkout-sessions`,
       rss: `${baseUrl}/rss.xml`,
       sitemap: `${baseUrl}/sitemap.xml`,
       robots: `${baseUrl}/robots.txt`,
@@ -1272,6 +1276,24 @@ export async function onRequest({ request, next, env }) {
   if (path === WELL_KNOWN_MCP_SERVER_CARD) {
     if (request.method === "GET" || request.method === "HEAD") return buildMcpServerCard(baseUrl);
     return errors.methodNotAllowed("GET, OPTIONS");
+  }
+
+  // Agentic-commerce demo surfaces — UCP (ucp.dev) + ACP (OpenAI). This is
+  // a free podcast: nothing is for sale and no payment is ever taken. The
+  // endpoints return canned, spec-shaped demo objects so commerce agents
+  // can exercise the protocol handshake. Handled before the static-asset
+  // branch so the `.json` discovery paths don't fall through to Pages.
+  if (path === "/.well-known/ucp" || path === "/.well-known/ucp.json") {
+    return commerce.ucpDiscovery(baseUrl);
+  }
+  if (path === "/.well-known/acp" || path === "/.well-known/acp.json") {
+    return commerce.acpDiscovery(baseUrl);
+  }
+  if (path === "/checkout-sessions" || path.startsWith("/checkout-sessions/")) {
+    return commerce.handleCheckout(request, baseUrl, "ucp");
+  }
+  if (path === "/checkout_sessions" || path.startsWith("/checkout_sessions/")) {
+    return commerce.handleCheckout(request, baseUrl, "acp");
   }
 
   // Absolute-URL placeholders in generated static files

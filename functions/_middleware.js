@@ -659,17 +659,78 @@ function wantsAgentMode(url) {
   return url.searchParams.get("mode") === "agent";
 }
 
-function wantsMarkdown(request) {
-  const accept = request.headers.get("accept") || "";
-  // Match `text/markdown` even with parameters (q-values, charset).
-  return /\btext\/markdown\b/i.test(accept);
+// ─── RFC 9110 §12.5.1 Accept-header content negotiation ───────────────────
+// Parse Accept into media-range entries, then pick the representation the
+// server should return. Replaces substring matching, which ignored q-values
+// (`text/markdown;q=0` — markdown explicitly refused — still matched) and
+// relative client preference (`text/html, text/markdown;q=0.1` still served
+// markdown even though HTML clearly ranks higher).
+
+function parseAccept(header) {
+  if (!header || !header.trim()) return null;
+  const entries = [];
+  for (const part of header.split(",")) {
+    const segs = part.trim().split(";");
+    const range = segs[0].trim().toLowerCase();
+    const slash = range.indexOf("/");
+    if (slash === -1) continue;
+    const type = range.slice(0, slash);
+    const subtype = range.slice(slash + 1);
+    if (!type || !subtype) continue;
+    let q = 1;
+    for (const param of segs.slice(1)) {
+      const eq = param.indexOf("=");
+      if (eq === -1) continue;
+      if (param.slice(0, eq).trim().toLowerCase() === "q") {
+        const v = parseFloat(param.slice(eq + 1));
+        if (Number.isFinite(v)) q = Math.min(Math.max(v, 0), 1);
+      }
+    }
+    // Precedence: fully specified (2) beats type/* (1) beats */* (0).
+    const specificity = type === "*" ? 0 : subtype === "*" ? 1 : 2;
+    entries.push({ type, subtype, q, specificity });
+  }
+  return entries.length ? entries : null;
 }
 
-function wantsApplicationJson(request) {
-  const accept = request.headers.get("accept") || "";
-  // Strict — only when the client explicitly asks for JSON (not `*/*`).
-  return /\bapplication\/json\b/i.test(accept);
+// Quality the client assigns to `mediaType`, using the most specific
+// matching Accept entry (RFC 9110 §12.5.1). 0 when nothing matches.
+function qualityFor(mediaType, entries) {
+  const slash = mediaType.indexOf("/");
+  const type = mediaType.slice(0, slash);
+  const subtype = mediaType.slice(slash + 1);
+  let best = null;
+  for (const e of entries) {
+    const matches =
+      (e.type === "*" || e.type === type) &&
+      (e.subtype === "*" || e.subtype === subtype);
+    if (matches && (!best || e.specificity > best.specificity)) best = e;
+  }
+  return best ? best.q : 0;
 }
+
+// `offered` lists the server's representations in preference order (best
+// first). Returns the chosen media type, or `null` when the client rules
+// out every offering (caller answers 406). A missing/empty Accept header
+// means "anything" → the first offering. Ties resolve to the earlier entry.
+function negotiate(header, offered) {
+  const entries = parseAccept(header);
+  if (!entries) return offered[0];
+  let chosen = null;
+  let chosenQ = 0;
+  for (const m of offered) {
+    const q = qualityFor(m, entries);
+    if (q > chosenQ) {
+      chosen = m;
+      chosenQ = q;
+    }
+  }
+  return chosen;
+}
+
+// Representations the homepage and episode pages can produce, in server
+// preference order. Ties and `*/*` resolve to HTML, the human entry point.
+const NEGOTIABLE_TYPES = ["text/html", "text/markdown", "application/json"];
 
 // ─── /.well-known/mcp* manifest + live handshake ──────────────────────────
 // Multiple URL spellings, one manifest body. Cheap announcement surface for
@@ -1325,19 +1386,24 @@ export async function onRequest({ request, next, env }) {
     return redirect301("/");
   }
 
-  // Episode: /NN with optional ?mode=agent or Accept: text/markdown.
+  // Episode: /NN with optional ?mode=agent or Accept negotiation.
   // (The /NN.md form is handled earlier, before the static-asset branch.)
   const epMatch = path.match(/^\/(\d{1,3})$/);
   if (epMatch) {
     const id = parseInt(epMatch[1]);
     const ep = episodes.find((e) => e.id === id);
-    const wantsJson = wantsAgentMode(url) || wantsApplicationJson(request);
-    if (!ep) {
-      // Agent context → real 404 with JSON envelope. Browsers → 301 to home.
-      return wantsJson || wantsMarkdown(request) ? errors.episodeNotFound(id) : redirect301("/");
+    // Explicit ?mode=agent forces the JSON view, bypassing Accept.
+    if (wantsAgentMode(url)) {
+      return ep ? buildAgentJson(ep, baseUrl) : errors.episodeNotFound(id);
     }
-    if (wantsAgentMode(url) || wantsApplicationJson(request)) return buildAgentJson(ep, baseUrl);
-    if (wantsMarkdown(request)) return buildEpisodeMarkdown(ep, baseUrl);
+    const chosen = negotiate(request.headers.get("accept"), NEGOTIABLE_TYPES);
+    if (chosen === null) return errors.notAcceptable(NEGOTIABLE_TYPES);
+    if (!ep) {
+      // Agent context (markdown/JSON) → real 404. Browsers → 301 to home.
+      return chosen === "text/html" ? redirect301("/") : errors.episodeNotFound(id);
+    }
+    if (chosen === "application/json") return buildAgentJson(ep, baseUrl);
+    if (chosen === "text/markdown") return buildEpisodeMarkdown(ep, baseUrl);
     return renderPage(ep, request);
   }
 
@@ -1352,7 +1418,10 @@ export async function onRequest({ request, next, env }) {
   // Homepage — agent JSON view, markdown negotiation, or HTML
   if (path === "/" || path === "") {
     if (wantsAgentMode(url)) return buildAgentJson(null, baseUrl);
-    if (wantsMarkdown(request)) {
+    const chosen = negotiate(request.headers.get("accept"), NEGOTIABLE_TYPES);
+    if (chosen === null) return errors.notAcceptable(NEGOTIABLE_TYPES);
+    if (chosen === "application/json") return buildAgentJson(null, baseUrl);
+    if (chosen === "text/markdown") {
       // Pages routes by URL path — next() can't be re-pointed at /index.md.
       // Fetch the static asset via env.ASSETS instead and serve it with the
       // markdown content-type and the correct Vary/Link/cache headers.

@@ -131,6 +131,13 @@ export const errors = {
       message: `This endpoint only accepts ${allowed}.`,
       hint: "/api/llms.txt",
     }),
+  notAcceptable: (offered) =>
+    apiError({
+      status: 406,
+      code: "not_acceptable",
+      message: "We can't serve a representation that matches your Accept header.",
+      hint: `Available types: ${(offered || []).join(", ")}. Try Accept: text/html or text/markdown.`,
+    }),
   rateLimited: (retryAfter = 60) =>
     apiError({
       status: 429,

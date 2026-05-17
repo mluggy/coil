@@ -78,6 +78,11 @@ const spec = {
     },
   },
   servers: [{ url: SITE }],
+  // Explicit empty security requirement: the whole API is public and
+  // unauthenticated. An absent `security` is ambiguous — `[]` is the
+  // OpenAPI-correct way to declare "no auth required" and satisfies the
+  // security-defined check on every operation without a scheme.
+  security: [],
   tags: [
     { name: "search", description: "Full-text and natural-language search over episodes." },
     { name: "episodes", description: "Episode catalog and metadata." },
@@ -894,11 +899,14 @@ function rateLimitResponseHeaders() {
 
 mkdirSync("public/.well-known", { recursive: true });
 writeFileSync("public/.well-known/openapi.json", JSON.stringify(spec, null, 2) + "\n");
-// YAML companion. orank's `api-response-quality` parser appears to
-// stream-parse with a fetch limit — JSON either parses fully or fails
-// (we observed the same "could not fully parse" 1/3 result on
-// stripe.com, github.com, and us); YAML degrades gracefully and a
-// spree.commerce-style YAML scores 2/3 on the same check. Both files
-// describe the exact same surface — just two encodings.
-writeFileSync("public/.well-known/openapi.yaml", yaml.dump(spec, { lineWidth: 120, noRefs: false }));
+// YAML companion — same surface, second encoding. orank's
+// `api-response-quality` parser consumes the YAML (advertised first in
+// the Link header).
+//
+// `noRefs: true` is critical: js-yaml's default (`noRefs: false`) emits
+// shared objects — here the reused error-response refs — as YAML
+// `&anchor` / `*alias` nodes. A parser that doesn't resolve aliases sees
+// `'400': *ref_0` and bails with "could not fully parse for detailed
+// analysis". Expanding them inline costs a few KB and parses everywhere.
+writeFileSync("public/.well-known/openapi.yaml", yaml.dump(spec, { lineWidth: 120, noRefs: true }));
 console.log("Generated public/.well-known/openapi.json + openapi.yaml");

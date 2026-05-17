@@ -21,6 +21,14 @@ describe("openapi.yaml companion", () => {
     // but accepts YAML (2/3 on spree.commerce). Same content, two encodings.
     expect(existsSync("public/.well-known/openapi.yaml")).toBe(true);
   });
+
+  it("emits fully-expanded YAML — no anchors/aliases", () => {
+    // js-yaml's default reuses shared objects (the error-response refs) as
+    // `&anchor` / `*alias` nodes; parsers that don't resolve aliases bail
+    // with "could not fully parse". The generator sets noRefs: true.
+    const yamlText = readFileSync("public/.well-known/openapi.yaml", "utf8");
+    expect(yamlText).not.toMatch(/[&*]ref_\d/);
+  });
 });
 
 describe("/.well-known/openapi.json", () => {
@@ -42,6 +50,12 @@ describe("/.well-known/openapi.json", () => {
   it("declares at least one server", () => {
     expect(Array.isArray(spec.servers)).toBe(true);
     expect(spec.servers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("declares an explicit public security requirement", () => {
+    // security: [] is the OpenAPI-correct "no auth required" — unambiguous
+    // for agents and satisfies the security-defined check on every op.
+    expect(spec.security).toEqual([]);
   });
 
   it("declares core read paths", () => {

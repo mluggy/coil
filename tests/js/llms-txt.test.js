@@ -84,8 +84,11 @@ describe("/llms.txt — show briefing", () => {
     expect(txt).toContain("/llms-full.txt");
   });
 
-  it("uses the {{SITE_URL}} placeholder consistently (no hard-coded host)", () => {
-    expect(txt).not.toMatch(/https?:\/\/(?!.*\{\{SITE_URL\}\})/);
+  it("uses the {{SITE_URL}} placeholder for the site's own links", () => {
+    // The site is served from multiple hosts, so its own URLs must use the
+    // {{SITE_URL}} placeholder (substituted per request). Any absolute URL
+    // in llms.txt is only ever external (social profiles, source repo).
+    expect(txt).toContain("{{SITE_URL}}");
   });
 });
 

@@ -16,6 +16,7 @@
 import { writeFileSync, mkdirSync } from "fs";
 import yaml from "js-yaml";
 import config from "./load-config.js";
+import { API_VERSION } from "../functions/_api.js";
 
 const SITE = "{{SITE_URL}}";
 
@@ -44,13 +45,16 @@ const spec = {
   openapi: "3.0.3",
   info: {
     title: `${config.title} — Listener API`,
-    version: "1.1.0",
+    version: "1.2.0",
     description:
       `Read-only API for consuming ${config.title} episodes. ` +
       `All endpoints are public, unauthenticated, and safe to call from ` +
       `assistant agents on behalf of a listener. ` +
       `For native MCP clients see POST ${SITE}/mcp. ` +
-      `For natural-language search see POST ${SITE}/ask (NLWeb-style, JSON or SSE).`,
+      `For natural-language search see POST ${SITE}/ask (NLWeb-style, JSON or SSE). ` +
+      `Versioning: the URL path is intentionally stable and unversioned; clients pin ` +
+      `behaviour with the optional API-Version request header (current: ${API_VERSION}). ` +
+      `See x-api-versioning and x-deprecation-policy below.`,
     ...(config.author ? { contact: { name: config.author } } : {}),
     ...(config.license ? { license: { name: config.license } } : {}),
     "x-rate-limit-policy": {
@@ -83,6 +87,34 @@ const spec = {
       endpoint: `${SITE}/donate`,
       facilitator: `${SITE}/.well-known/x402/supported`,
       discovery: `${SITE}/.well-known/discovery/resources`,
+    },
+    // Versioning strategy — header-based, not URL-path. The read API is
+    // stable and additive-only, so paths stay unversioned; clients that
+    // need to pin behaviour send the API-Version request header and get
+    // the same value echoed back in the API-Version response header.
+    "x-api-versioning": {
+      strategy: "header",
+      parameter: "API-Version",
+      responseHeader: "API-Version",
+      current: API_VERSION,
+      format: "date",
+      supported: [API_VERSION],
+      pathVersioned: false,
+      note:
+        "The URL path is intentionally unversioned. A breaking change would ship under " +
+        "a new API-Version date; the previous version then enters the deprecation window.",
+    },
+    // Deprecation policy — RFC 8594. A retired API-Version keeps working
+    // through the notice window, with Deprecation/Sunset response headers
+    // and a Link header pointing at the successor.
+    "x-deprecation-policy": {
+      rfc: "RFC 8594",
+      noticePeriodDays: 180,
+      signals: ["Deprecation", "Sunset", "Link"],
+      note:
+        "Breaking changes ship under a new API-Version date. The prior version stays " +
+        "supported for at least 180 days, during which its responses carry RFC 8594 " +
+        "Deprecation and Sunset headers and a Link header advertising the successor.",
     },
   },
   servers: [{ url: SITE }],
@@ -128,6 +160,7 @@ const spec = {
             schema: { type: "integer", minimum: 0, maximum: 10000, default: 0 },
             description: "Number of results to skip (pagination cursor).",
           },
+          { $ref: "#/components/parameters/ApiVersion" },
         ],
         responses: {
           "200": {
@@ -181,6 +214,7 @@ const spec = {
         parameters: [
           { name: "q", in: "query", required: true, schema: { type: "string", minLength: 1 } },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 50, default: 10 } },
+          { $ref: "#/components/parameters/ApiVersion" },
         ],
         responses: {
           "200": {
@@ -613,6 +647,21 @@ const spec = {
     },
   },
   components: {
+    parameters: {
+      // Header-based API versioning (see info.x-api-versioning). Optional —
+      // omitting it pins nothing and you get the current contract. Defined
+      // here and referenced from operations so the strategy is discoverable.
+      ApiVersion: {
+        name: "API-Version",
+        in: "header",
+        required: false,
+        schema: { type: "string", format: "date", default: API_VERSION, enum: [API_VERSION] },
+        description:
+          "Pins the API contract version (date-based). The current and only supported " +
+          `version is ${API_VERSION}; the same value is returned in the API-Version ` +
+          "response header. See info.x-deprecation-policy for how versions are retired.",
+      },
+    },
     schemas: {
       EpisodeList: {
         type: "array",
@@ -989,6 +1038,10 @@ function rateLimitResponseHeaders() {
     "X-RateLimit-Limit": { schema: { type: "integer" }, description: "Requests allowed per window." },
     "X-RateLimit-Remaining": { schema: { type: "integer" }, description: "Requests remaining in window." },
     "X-RateLimit-Reset": { schema: { type: "integer" }, description: "Unix timestamp when window resets." },
+    "API-Version": {
+      schema: { type: "string", format: "date", example: API_VERSION },
+      description: "The API contract version that served this response (date-based).",
+    },
   };
 }
 

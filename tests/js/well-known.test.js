@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
+import config from "../../scripts/load-config.js";
 
 beforeAll(() => {
   // Ensure the generators have run at least once. They're idempotent and
@@ -138,20 +139,26 @@ describe("robots.txt", () => {
     expect(matches.length).toBeGreaterThanOrEqual(10);
   });
 
-  it("blocks training crawlers when ai_training=false", () => {
-    expect(txt).toMatch(/User-agent: GPTBot\n[^\n]*\nDisallow: \//);
-    expect(txt).toMatch(/User-agent: ClaudeBot\n[^\n]*\nDisallow: \//);
-    expect(txt).toMatch(/User-agent: CCBot\n[^\n]*\nDisallow: \//);
-    expect(txt).toMatch(/User-agent: Bytespider\n[^\n]*\nDisallow: \//);
+  it("gates TIER 2 training crawlers on ai_training", () => {
+    // ai_training: true → training crawlers Allowed; false → Disallowed.
+    const rule = config.ai_training ? "Allow" : "Disallow";
+    for (const bot of ["GPTBot", "ClaudeBot", "CCBot", "Bytespider"]) {
+      expect(txt).toMatch(new RegExp(`User-agent: ${bot}\\n[^\\n]*\\n${rule}: /`));
+    }
   });
 
-  it("declares Content-Signal: ai-train=no on TIER 2 blocked bots", () => {
-    expect(txt).toMatch(/User-agent: GPTBot\nContent-Signal: search=yes, ai-input=yes, ai-train=no/);
-    expect(txt).toMatch(/User-agent: CCBot\nContent-Signal: search=no, ai-input=no, ai-train=no/);
+  it("declares the ai-train Content-Signal on TIER 2 bots per ai_training", () => {
+    const train = config.ai_training ? "yes" : "no";
+    expect(txt).toMatch(
+      new RegExp(`User-agent: GPTBot\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}`)
+    );
   });
 
-  it("emits global Content-Signal for User-agent: *", () => {
-    expect(txt).toMatch(/User-agent: \*\nContent-Signal: search=yes, ai-input=yes, ai-train=no/);
+  it("emits a global Content-Signal for User-agent: * matching ai_training", () => {
+    const train = config.ai_training ? "yes" : "no";
+    expect(txt).toMatch(
+      new RegExp(`User-agent: \\*\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}`)
+    );
   });
 
   it("declares Sitemap and Schemamap", () => {

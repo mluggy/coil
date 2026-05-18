@@ -15,6 +15,14 @@ export const RATE_LIMIT_PER_MIN = 60;
 
 export const ERROR_DOCS_URL = "/api/llms.txt";
 
+// Date-based API contract version. The read API is intentionally
+// unversioned in its URL path — it's stable and additive-only. Clients
+// that want to pin behaviour send the `API-Version` request header; the
+// same value is echoed back in the `API-Version` response header on every
+// API response. A breaking change would ship under a new date, with the
+// prior version kept alive per the deprecation policy in the OpenAPI spec.
+export const API_VERSION = "2026-05-18";
+
 function rateLimitHeaders() {
   // Reset = next minute boundary in Unix seconds.
   const reset = Math.ceil(Date.now() / 60000) * 60;
@@ -34,7 +42,7 @@ function corsHeaders() {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Prefer",
     "Access-Control-Expose-Headers":
-      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After, API-Version",
   };
 }
 
@@ -44,6 +52,7 @@ export function apiHeaders(extra = {}) {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "public, max-age=60, stale-while-revalidate=600",
     Vary: "Accept, Prefer",
+    "API-Version": API_VERSION,
     ...corsHeaders(),
     ...rateLimitHeaders(),
     ...extra,

@@ -104,31 +104,37 @@ function esc(s) {
     .replace(/'/g, "&#39;");
 }
 
-// AggregateRating aggregated across the per-platform listener ratings in
-// podcast.yaml (`ratings:`). The mean is weighted by review count so a
-// 5-star/3-review platform doesn't outweigh a 4-star/10k-review one.
-// Returns null when nothing usable is configured — the homepage @graph
-// then omits the AggregateRating node entirely rather than emitting a fake.
+// AggregateRating sourced from the per-platform listener ratings in
+// podcast.yaml (`ratings:`). Only Apple Podcasts and Spotify are read —
+// they're the only platforms that expose a public podcast star rating.
+// Rather than averaging, the homepage surfaces the single best platform:
+// highest rating wins, ties broken by review count (5.0 from 10 reviews
+// beats 4.5 from 20). Returns null when neither is configured — the
+// @graph then omits the node rather than emitting a fake.
 function buildAggregateRating() {
   const src = config.ratings && typeof config.ratings === "object" ? config.ratings : {};
-  let weighted = 0;
-  let reviews = 0;
-  for (const key of Object.keys(src)) {
+  let best = null;
+  for (const key of ["apple", "spotify"]) {
     const entry = src[key] || {};
     const rating = Number(entry.rating);
-    const count = Number(entry.reviews);
-    if (!(rating > 0) || !(count > 0)) continue;
-    weighted += Math.min(rating, 5) * count;
-    reviews += count;
+    const reviews = Number(entry.reviews);
+    if (!(rating > 0) || !(reviews > 0)) continue;
+    if (
+      !best ||
+      rating > best.rating ||
+      (rating === best.rating && reviews > best.reviews)
+    ) {
+      best = { rating: Math.min(rating, 5), reviews };
+    }
   }
-  if (reviews <= 0) return null;
+  if (!best) return null;
   return {
     "@type": "AggregateRating",
-    ratingValue: Math.round((weighted / reviews) * 10) / 10,
+    ratingValue: Math.round(best.rating * 10) / 10,
     bestRating: 5,
     worstRating: 1,
-    ratingCount: reviews,
-    reviewCount: reviews,
+    ratingCount: best.reviews,
+    reviewCount: best.reviews,
   };
 }
 

@@ -179,20 +179,20 @@ youtube_id: ""
 amazon_music_id: ""
 
 # -- Listener ratings (optional) --
-# Per-platform listener ratings. When set, they emit a JSON-LD
-# AggregateRating node on the homepage (attached to the Product and
-# PodcastSeries blocks), aggregated as a review-count-weighted mean so a
-# 5-star/3-review platform doesn't outweigh a 4-star/10k-review one.
-# Each entry needs `rating` (0-5, one decimal) and `reviews` (vote/review
-# count, integer >= 0). Copy the numbers from your show's public page on
-# each platform. Leave a value at 0 (or delete the line) to skip that
-# platform; if every platform is 0, no AggregateRating is emitted.
+# Apple Podcasts and Spotify listener ratings. When set, they emit a
+# JSON-LD AggregateRating node on the homepage (attached to the Product
+# and PodcastSeries blocks). Only these two platforms are read - they're
+# the only ones that expose a public podcast star rating.
+# Each entry needs `rating` (0-5, one decimal) and `reviews` (rating
+# count, integer >= 0). Copy the numbers from Apple Podcasts Connect and
+# Spotify for Creators. The homepage surfaces the single best platform -
+# highest rating wins, ties broken by review count (5.0 from 10 reviews
+# beats 4.5 from 20), not an average. Leave a value at 0 (or delete the
+# line) to skip a platform; if both are 0, no AggregateRating is emitted.
 # Directly addresses orank's "Schema type breadth" check.
 ratings:
-  spotify: { rating: 0, reviews: 0 }
   apple: { rating: 0, reviews: 0 }
-  amazon: { rating: 0, reviews: 0 }
-  youtube: { rating: 0, reviews: 0 }
+  spotify: { rating: 0, reviews: 0 }
 
 # -- Custom FAQ entries (optional) --
 # Extra question/answer pairs appended to the JSON-LD FAQPage on the

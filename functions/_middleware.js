@@ -284,8 +284,9 @@ function buildJsonLd(episode, baseUrl) {
         platformList.map(([n, u]) => `${n} (${u})`).join(", ") +
         `, or add ${baseUrl}/rss.xml to any podcast app.`
       : `Add ${baseUrl}/rss.xml to any podcast app.`;
-    // Host-authored FAQ entries from podcast.yaml (`faqs:`), appended after
-    // the auto-generated subscribe/pricing/language questions.
+    // Host-authored FAQ entries from podcast.yaml (`faqs:`). When the host
+    // defines any, they become the whole FAQ list; otherwise the generic
+    // templated set below is the fallback.
     const customFaqs = (Array.isArray(config.faqs) ? config.faqs : [])
       .filter((f) => f && f.q && f.a)
       .map((f) => ({
@@ -293,10 +294,7 @@ function buildJsonLd(episode, baseUrl) {
         name: String(f.q),
         acceptedAnswer: { "@type": "Answer", text: String(f.a) },
       }));
-    const faq = {
-      "@type": "FAQPage",
-      "@id": `${baseUrl}/#faq`,
-      mainEntity: [
+    const genericFaqs = [
         {
           "@type": "Question",
           name: `How do I subscribe to ${config.title}?`,
@@ -359,8 +357,11 @@ function buildJsonLd(episode, baseUrl) {
               `Full comparison: ${baseUrl}/compare.`,
           },
         },
-        ...customFaqs,
-      ],
+    ];
+    const faq = {
+      "@type": "FAQPage",
+      "@id": `${baseUrl}/#faq`,
+      mainEntity: customFaqs.length ? customFaqs : genericFaqs,
     };
 
     // Homepage BreadcrumbList — gives navigation context and broadens the

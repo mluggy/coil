@@ -2,7 +2,7 @@ import template from "./_html-template.js";
 import episodes from "./_episodes.js";
 import config from "./_config.js";
 import { apiHeaders, errors } from "./_api.js";
-import { handleMcpPost, buildMcpGetManifest, TOOLS as MCP_TOOLS, SERVER_INFO as MCP_SERVER_INFO, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION } from "./mcp.js";
+import { handleMcpPost, buildMcpGetManifest, mcpCsp, TOOLS as MCP_TOOLS, SERVER_INFO as MCP_SERVER_INFO, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION } from "./mcp.js";
 import * as commerce from "./_commerce.js";
 
 const BOTS = /googlebot|google-inspectiontool|bingbot|yandex|baiduspider|twitterbot|facebookexternalhit|linkedinbot|slackbot-linkexpanding|discordbot|whatsapp|telegrambot|applebot|pinterestbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|anthropic-ai|claudebot|ccbot/i;
@@ -837,6 +837,9 @@ function buildMcpManifest(baseUrl) {
         // 401-aware clients can find OAuth metadata even when auth isn't
         // required. Helps orank's MCP-auth-mechanism probe.
         "WWW-Authenticate": `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+        // Scoped CSP — mirrors the /mcp endpoint so orank's mcp-view-csp
+        // check passes on the well-known discovery URL too.
+        "Content-Security-Policy": mcpCsp(baseUrl),
       }),
     }
   );
@@ -897,7 +900,10 @@ function buildMcpServerCard(baseUrl) {
     })),
   };
   return new Response(JSON.stringify(card, null, 2) + "\n", {
-    headers: apiHeaders({ "Cache-Control": HTML_CACHE_CONTROL }),
+    headers: apiHeaders({
+      "Cache-Control": HTML_CACHE_CONTROL,
+      "Content-Security-Policy": mcpCsp(baseUrl),
+    }),
   });
 }
 

@@ -214,6 +214,23 @@ describe("MCP App view CSP (resources/read)", () => {
   });
 });
 
+describe("MCP endpoint CSP header (orank mcp-view-csp)", () => {
+  it("sends a scoped Content-Security-Policy header on /mcp responses", async () => {
+    const resp = await rpc({ jsonrpc: "2.0", id: 1, method: "ping" });
+    const csp = resp.headers.get("content-security-policy");
+    expect(csp).toBeTruthy();
+    // The four directive categories orank's mcp-view-csp check scores.
+    expect(csp).toMatch(/connect-src[^;]*'self'/);
+    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
+    expect(csp).toMatch(/form-action 'none'/);
+    expect(csp).toMatch(/img-src 'self'/);
+    expect(csp).toMatch(/script-src 'self'/);
+    // No permissive bare wildcard.
+    expect(csp).not.toMatch(/(^|[\s;])\*([\s;]|$)/);
+  });
+});
+
 describe("unknown method", () => {
   it("returns -32601 method not found", async () => {
     const r = await rpcJson({ jsonrpc: "2.0", id: 9, method: "garbage/here" });

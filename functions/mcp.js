@@ -116,10 +116,32 @@ const INSTRUCTIONS = [
   "MCP Apps: tool definitions include _meta.ui.resourceUri pointing to ui:// resources that render playable cards inline; fetch with resources/read.",
 ].filter(Boolean).join(" ");
 
+// Content-Security-Policy for the /mcp endpoint HTTP response. orank's
+// "MCP App view CSP" check reads this header straight off the /mcp URL
+// and scores four directive categories: connect-src reaches the MCP
+// origin, frame-ancestors allows the ChatGPT and Claude.ai hosts,
+// form-action is scoped, and the asset directives are non-wildcard.
+// The endpoint only ever returns JSON, so everything is locked to
+// 'self'/'none' — no inline assets, no third-party origins.
+export function mcpCsp(baseUrl) {
+  return [
+    "default-src 'none'",
+    `connect-src 'self'${baseUrl ? ` ${baseUrl}` : ""}`,
+    "img-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "font-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'self' https://chatgpt.com https://claude.ai",
+  ].join("; ");
+}
+
 // Auth advertisement on every MCP HTTP response. RFC 6750 §3 says servers
 // may include a WWW-Authenticate challenge with non-401 responses to
 // signal supported auth mechanisms — orank's mcp-auth-mechanism probe
-// reads this on /mcp directly.
+// reads this on /mcp directly. The same header bag carries the CSP that
+// orank's mcp-view-csp check expects on the /mcp response.
 function jrpcHeaders(request) {
   let baseUrl = "";
   if (request) {
@@ -131,7 +153,8 @@ function jrpcHeaders(request) {
       `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", ` +
       `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource", ` +
       `as_uri="${baseUrl}/.well-known/oauth-authorization-server"`,
-  } : {});
+    "Content-Security-Policy": mcpCsp(baseUrl),
+  } : { "Content-Security-Policy": mcpCsp("") });
 }
 
 // Plain JSON-RPC result/error objects (no Response wrapper) — so a single
@@ -432,6 +455,7 @@ export async function onRequestGet({ request }) {
         `Bearer realm="${baseUrl}", scope="read:episodes read:transcripts search:episodes", ` +
         `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource", ` +
         `as_uri="${baseUrl}/.well-known/oauth-authorization-server"`,
+      "Content-Security-Policy": mcpCsp(baseUrl),
     }),
   });
 }

@@ -178,6 +178,31 @@ youtube_id: ""
 # and header icon link automatically.
 amazon_music_id: ""
 
+# -- Listener ratings (optional) --
+# Per-platform listener ratings. When set, they emit a JSON-LD
+# AggregateRating node on the homepage (attached to the Product and
+# PodcastSeries blocks), aggregated as a review-count-weighted mean so a
+# 5-star/3-review platform doesn't outweigh a 4-star/10k-review one.
+# Each entry needs `rating` (0-5, one decimal) and `reviews` (vote/review
+# count, integer >= 0). Copy the numbers from your show's public page on
+# each platform. Leave a value at 0 (or delete the line) to skip that
+# platform; if every platform is 0, no AggregateRating is emitted.
+# Directly addresses orank's "Schema type breadth" check.
+ratings:
+  spotify: { rating: 0, reviews: 0 }
+  apple: { rating: 0, reviews: 0 }
+  amazon: { rating: 0, reviews: 0 }
+  youtube: { rating: 0, reviews: 0 }
+
+# -- Custom FAQ entries (optional) --
+# Extra question/answer pairs appended to the JSON-LD FAQPage on the
+# homepage, on top of the auto-generated subscribe/pricing/language FAQs.
+# Each item needs a `q` and an `a`. Leave empty to emit only the
+# auto-generated FAQs.
+faqs: []
+#  - q: "Who is this podcast for?"
+#    a: "Anyone interested in the show's topics - no background required."
+
 # -- Social links --
 # Shown as icons in the site footer and included in JSON-LD sameAs.
 # Leave empty to hide.

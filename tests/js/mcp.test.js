@@ -22,17 +22,9 @@ async function rpcJson(body) {
 }
 
 describe("MCP TOOLS catalog", () => {
-  it("declares at least the five listener-facing tools", () => {
+  it("declares exactly the three listener-facing tools", () => {
     const names = TOOLS.map((t) => t.name);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        "search_episodes",
-        "get_episode",
-        "get_latest_episode",
-        "list_episodes",
-        "subscribe_via_rss",
-      ])
-    );
+    expect(names).toEqual(["search_episodes", "get_episode", "get_latest_episode"]);
   });
 
   it("every tool has a >= 20 char description (orank MCP descriptions check)", () => {
@@ -111,6 +103,35 @@ describe("tools/list", () => {
   });
 });
 
+describe("JSON-RPC batch", () => {
+  it("answers an array of requests with an array of responses in order", async () => {
+    const r = await rpcJson([
+      { jsonrpc: "2.0", id: 1, method: "ping" },
+      { jsonrpc: "2.0", id: 2, method: "tools/list" },
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_latest_episode", arguments: {} } },
+    ]);
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(r[0].result).toEqual({});
+    expect(r[1].result.tools.length).toBe(TOOLS.length);
+    expect(r[2].result.isError).toBe(false);
+  });
+
+  it("isolates per-request errors within a batch", async () => {
+    const r = await rpcJson([
+      { jsonrpc: "2.0", id: 1, method: "ping" },
+      { jsonrpc: "2.0", id: 2, method: "garbage/here" },
+    ]);
+    expect(r[0].result).toEqual({});
+    expect(r[1].error.code).toBe(-32601);
+  });
+
+  it("rejects an empty batch with -32600", async () => {
+    const r = await rpcJson([]);
+    expect(r.error.code).toBe(-32600);
+  });
+});
+
 describe("tools/call validation", () => {
   it("rejects unknown tools with -32601 + availableTools hint", async () => {
     const r = await rpcJson({
@@ -164,22 +185,30 @@ describe("MCP App view CSP (resources/read)", () => {
     );
   });
 
-  it("uses a scoped policy — no permissive bare wildcard", () => {
-    const csp = html.match(/content="([^"]+)"/)[1].replace(/&#39;/g, "'");
+  it("keeps CSP keyword tokens parseable — literal single quotes, no HTML entities", () => {
+    const csp = html.match(/content="([^"]+)"/)[1];
+    // esc() would turn 'self' into &#39;self&#39;, which a CSP parser
+    // reading the raw attribute reports as an unparseable directive.
+    expect(csp).not.toMatch(/&#39;|&amp;|&quot;/);
     expect(csp).toMatch(/default-src 'none'/);
+    expect(csp).toMatch(/script-src 'self'/);
+  });
+
+  it("uses a scoped policy — no permissive bare wildcard", () => {
+    const csp = html.match(/content="([^"]+)"/)[1];
     // A bare `*` source is permissive and loses orank points; a scoped
     // subdomain wildcard like `*.googletagmanager.com` (GA) is fine.
     expect(csp).not.toMatch(/(^|[\s;])\*([\s;]|$)/);
   });
 
   it("scopes connect-src/img-src to the MCP server origin", () => {
-    const csp = html.match(/content="([^"]+)"/)[1].replace(/&#39;/g, "'");
+    const csp = html.match(/content="([^"]+)"/)[1];
     expect(csp).toMatch(/connect-src[^;]*https:\/\/example\.test/);
     expect(csp).toMatch(/img-src[^;]*https:\/\/example\.test/);
   });
 
   it("allows framing only by ChatGPT and Claude", () => {
-    const csp = html.match(/content="([^"]+)"/)[1].replace(/&#39;/g, "'");
+    const csp = html.match(/content="([^"]+)"/)[1];
     expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/chatgpt\.com/);
     expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
   });

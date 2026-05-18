@@ -180,7 +180,7 @@ doc.push(`URL: ${SITE}/mcp`);
 doc.push(`Transport: Streamable HTTP`);
 doc.push(`Auth: None`);
 doc.push("```");
-doc.push(`After adding, Claude can call \`search_episodes\`, \`get_episode\`, \`get_latest_episode\`, \`list_episodes\`, and \`subscribe_via_rss\` directly.`);
+doc.push(`After adding, Claude can call \`search_episodes\`, \`get_episode\`, and \`get_latest_episode\` directly.`);
 doc.push("");
 
 doc.push("### ChatGPT (custom GPT)");

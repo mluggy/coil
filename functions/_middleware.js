@@ -104,6 +104,34 @@ function esc(s) {
     .replace(/'/g, "&#39;");
 }
 
+// AggregateRating aggregated across the per-platform listener ratings in
+// podcast.yaml (`ratings:`). The mean is weighted by review count so a
+// 5-star/3-review platform doesn't outweigh a 4-star/10k-review one.
+// Returns null when nothing usable is configured — the homepage @graph
+// then omits the AggregateRating node entirely rather than emitting a fake.
+function buildAggregateRating() {
+  const src = config.ratings && typeof config.ratings === "object" ? config.ratings : {};
+  let weighted = 0;
+  let reviews = 0;
+  for (const key of Object.keys(src)) {
+    const entry = src[key] || {};
+    const rating = Number(entry.rating);
+    const count = Number(entry.reviews);
+    if (!(rating > 0) || !(count > 0)) continue;
+    weighted += Math.min(rating, 5) * count;
+    reviews += count;
+  }
+  if (reviews <= 0) return null;
+  return {
+    "@type": "AggregateRating",
+    ratingValue: Math.round((weighted / reviews) * 10) / 10,
+    bestRating: 5,
+    worstRating: 1,
+    ratingCount: reviews,
+    reviewCount: reviews,
+  };
+}
+
 function buildJsonLd(episode, baseUrl) {
   // Authority links for the show itself. Spotify/Apple/Amazon/YouTube
   // are settable in podcast.yaml and act as podcast-directory authority
@@ -161,6 +189,7 @@ function buildJsonLd(episode, baseUrl) {
     // Homepage: emit a graph of PodcastSeries + WebSite (with SearchAction)
     // + Person, so agents can resolve the host as an entity and find an
     // episode-search action without scraping HTML.
+    const aggregateRating = buildAggregateRating();
     const series = {
       "@type": "PodcastSeries",
       "@id": `${baseUrl}/#podcast`,
@@ -175,6 +204,7 @@ function buildJsonLd(episode, baseUrl) {
       ...(config.license ? { license: config.license } : {}),
       ...(topics.length ? { keywords: topics.join(", ") } : {}),
       ...(sameAs.length ? { sameAs } : {}),
+      ...(aggregateRating ? { aggregateRating } : {}),
       speakable: {
         "@type": "SpeakableSpecification",
         cssSelector: ["h1", "header p"],
@@ -212,6 +242,7 @@ function buildJsonLd(episode, baseUrl) {
       brand: { "@id": `${baseUrl}/#podcast` },
       ...(sameAs.length ? { sameAs } : {}),
       ...(topics.length ? { keywords: topics.join(", ") } : {}),
+      ...(aggregateRating ? { aggregateRating } : {}),
       offers: {
         "@type": "Offer",
         price: "0",
@@ -247,6 +278,15 @@ function buildJsonLd(episode, baseUrl) {
         platformList.map(([n, u]) => `${n} (${u})`).join(", ") +
         `, or add ${baseUrl}/rss.xml to any podcast app.`
       : `Add ${baseUrl}/rss.xml to any podcast app.`;
+    // Host-authored FAQ entries from podcast.yaml (`faqs:`), appended after
+    // the auto-generated subscribe/pricing/language questions.
+    const customFaqs = (Array.isArray(config.faqs) ? config.faqs : [])
+      .filter((f) => f && f.q && f.a)
+      .map((f) => ({
+        "@type": "Question",
+        name: String(f.q),
+        acceptedAnswer: { "@type": "Answer", text: String(f.a) },
+      }));
     const faq = {
       "@type": "FAQPage",
       "@id": `${baseUrl}/#faq`,
@@ -313,12 +353,23 @@ function buildJsonLd(episode, baseUrl) {
               `Full comparison: ${baseUrl}/compare.`,
           },
         },
+        ...customFaqs,
+      ],
+    };
+
+    // Homepage BreadcrumbList — gives navigation context and broadens the
+    // JSON-LD type coverage orank's "Schema type breadth" check rewards.
+    const homeBreadcrumb = {
+      "@type": "BreadcrumbList",
+      "@id": `${baseUrl}/#breadcrumb`,
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: config.title, item: baseUrl },
       ],
     };
 
     return {
       "@context": "https://schema.org",
-      "@graph": [series, product, organization, website, person, faq],
+      "@graph": [series, product, organization, website, person, faq, homeBreadcrumb],
     };
   }
 
@@ -827,7 +878,7 @@ function buildMcpServerCard(baseUrl) {
     title: config.title,
     description:
       `Listener-facing MCP server for ${config.title}. ` +
-      "Search episodes, fetch transcripts, get the latest, browse the catalog, and grab the RSS feed for subscription.",
+      "Search episodes, fetch a specific episode with its transcript, and get the latest episode.",
     icon: iconUrl,
     icons: [{ src: iconUrl, sizes: "any", type: iconMime }],
     category: "podcast",

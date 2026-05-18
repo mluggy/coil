@@ -29,6 +29,21 @@ function esc(s) {
     .replace(/'/g, "&#39;");
 }
 
+// Escape a value for a double-quoted HTML attribute *without* touching
+// single quotes. The CSP meta tag carries directives whose keyword tokens
+// (`'self'`, `'none'`, `'unsafe-inline'`) are only valid with literal
+// single quotes — running them through esc() turns them into `&#39;self&#39;`,
+// which a CSP parser reading the raw attribute reports as an unparseable
+// directive. The attribute is double-quoted, so only `&`, `"`, `<`, `>`
+// need neutralising; `'` is left intact.
+function escCspAttr(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // Content-Security-Policy for the MCP App document. MCP clients render
 // these cards inside a sandboxed iframe, so the policy ships as a
 // <meta http-equiv> — there is no HTTP response of our own to carry a
@@ -75,7 +90,7 @@ function wrapDocument(title, body, baseUrl) {
 <html lang="${esc(config.language || "en")}" dir="${esc(config.direction || "ltr")}">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${esc(buildAppCsp(baseUrl))}">
+<meta http-equiv="Content-Security-Policy" content="${escCspAttr(buildAppCsp(baseUrl))}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>${esc(title)}</title>
@@ -309,8 +324,6 @@ export function uiResourceForTool(name, args, _result) {
     }
     case "get_latest_episode":
       return "ui://latest_episode";
-    case "list_episodes":
-      return "ui://catalog";
     default:
       return null;
   }

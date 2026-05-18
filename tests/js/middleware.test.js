@@ -287,7 +287,7 @@ describe("/.well-known/mcp dispatch", () => {
     expect(body.auth.type).toBe("oauth2");
     expect(body.auth.pkce).toBe("S256");
     expect(Array.isArray(body.tools)).toBe(true);
-    expect(body.tools.length).toBeGreaterThanOrEqual(5);
+    expect(body.tools.length).toBeGreaterThanOrEqual(3);
   });
 });
 

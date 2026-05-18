@@ -449,29 +449,59 @@ const spec = {
         summary: "MCP JSON-RPC endpoint",
         description:
           "Streamable HTTP transport for the Model Context Protocol. " +
-          "Methods: initialize, ping, tools/list, tools/call. " +
-          "Tools: search_episodes, get_episode, get_latest_episode, list_episodes, subscribe_via_rss.",
+          "Methods: initialize, ping, tools/list, tools/call, resources/list, resources/read. " +
+          "Tools: search_episodes, get_episode, get_latest_episode. " +
+          "Batch / bulk: the request body may also be a JSON-RPC 2.0 batch — " +
+          "a non-empty array (max 50) of request objects executed in one round-trip; " +
+          "the response is an array of responses in the same order.",
         operationId: "callMcp",
         tags: ["mcp"],
         requestBody: {
           required: true,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/JsonRpcRequest" },
-              example: {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "tools/call",
-                params: { name: "search_episodes", arguments: { query: "agents", limit: 5 } },
+              schema: {
+                oneOf: [
+                  { $ref: "#/components/schemas/JsonRpcRequest" },
+                  { $ref: "#/components/schemas/JsonRpcBatchRequest" },
+                ],
+              },
+              examples: {
+                single: {
+                  summary: "Single tool call",
+                  value: {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "tools/call",
+                    params: { name: "search_episodes", arguments: { query: "agents", limit: 5 } },
+                  },
+                },
+                batch: {
+                  summary: "Batch / bulk call (array of requests)",
+                  value: [
+                    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+                    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "get_latest_episode", arguments: {} } },
+                    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_episode", arguments: { id: 1 } } },
+                  ],
+                },
               },
             },
           },
         },
         responses: {
           "200": {
-            description: "JSON-RPC 2.0 response.",
+            description: "A JSON-RPC 2.0 response, or — for a batch request — an array of responses in request order.",
             headers: rateLimitResponseHeaders(),
-            content: { "application/json": { schema: { $ref: "#/components/schemas/JsonRpcResponse" } } },
+            content: {
+              "application/json": {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/JsonRpcResponse" },
+                    { $ref: "#/components/schemas/JsonRpcBatchResponse" },
+                  ],
+                },
+              },
+            },
           },
           ...errorResponses,
         },
@@ -495,26 +525,48 @@ const spec = {
       },
       post: {
         summary: "MCP JSON-RPC at well-known URL",
-        description: "Same JSON-RPC endpoint as /mcp; agents that probe well-known can initialize directly.",
+        description:
+          "Same JSON-RPC endpoint as /mcp; agents that probe well-known can initialize directly. " +
+          "Also accepts a JSON-RPC 2.0 batch (array of up to 50 request objects).",
         operationId: "callMcpWellKnown",
         tags: ["mcp"],
-        // Inlined (instead of `$ref: "#/components/requestBodies/..."`).
-        // Some scanners can't dereference requestBody refs and bail with
-        // "could not fully parse".
         requestBody: {
           required: true,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/JsonRpcRequest" },
-              example: { jsonrpc: "2.0", id: 1, method: "initialize" },
+              schema: {
+                oneOf: [
+                  { $ref: "#/components/schemas/JsonRpcRequest" },
+                  { $ref: "#/components/schemas/JsonRpcBatchRequest" },
+                ],
+              },
+              examples: {
+                single: { summary: "Single request", value: { jsonrpc: "2.0", id: 1, method: "initialize" } },
+                batch: {
+                  summary: "Batch request",
+                  value: [
+                    { jsonrpc: "2.0", id: 1, method: "initialize" },
+                    { jsonrpc: "2.0", id: 2, method: "tools/list" },
+                  ],
+                },
+              },
             },
           },
         },
         responses: {
           "200": {
-            description: "JSON-RPC 2.0 response.",
+            description: "A JSON-RPC 2.0 response, or an array of responses for a batch request.",
             headers: rateLimitResponseHeaders(),
-            content: { "application/json": { schema: { $ref: "#/components/schemas/JsonRpcResponse" } } },
+            content: {
+              "application/json": {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/JsonRpcResponse" },
+                    { $ref: "#/components/schemas/JsonRpcBatchResponse" },
+                  ],
+                },
+              },
+            },
           },
           ...errorResponses,
         },
@@ -748,6 +800,17 @@ const spec = {
               },
             },
           },
+          batch: {
+            type: "object",
+            description: "JSON-RPC 2.0 batch capability — POST an array of request objects to /mcp.",
+            properties: {
+              supported: { type: "boolean" },
+              transport: { type: "string" },
+              endpoint: { type: "string", format: "uri" },
+              maxBatchSize: { type: "integer" },
+              openapi: { type: "string" },
+            },
+          },
           docs: { type: "string", format: "uri" },
         },
       },
@@ -821,6 +884,21 @@ const spec = {
             },
           },
         },
+      },
+      JsonRpcBatchRequest: {
+        type: "array",
+        description:
+          "JSON-RPC 2.0 batch — a non-empty array of request objects executed in a single " +
+          "round-trip. The server answers with an array of responses in the same order. " +
+          "Capped at 50 requests per batch.",
+        minItems: 1,
+        maxItems: 50,
+        items: { $ref: "#/components/schemas/JsonRpcRequest" },
+      },
+      JsonRpcBatchResponse: {
+        type: "array",
+        description: "Array of JSON-RPC 2.0 responses, one per batch request, in request order.",
+        items: { $ref: "#/components/schemas/JsonRpcResponse" },
       },
       DonateReceipt: {
         type: "object",

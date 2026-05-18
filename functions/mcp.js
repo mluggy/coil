@@ -5,9 +5,10 @@
 // Tools (all read-only, all driven by static episode data):
 //   search_episodes(query, limit?)   — ranked match
 //   get_episode(id)                  — full detail incl. transcript
-//   get_latest_episode()             — most recent
-//   list_episodes(limit?, offset?)   — paginated browse
-//   subscribe_via_rss()              — return RSS URL
+//   get_latest_episode(since?)       — most recent
+//
+// The JSON-RPC endpoint also accepts a batch (an array of request
+// objects) and answers with an array of responses — see handleMcpPost.
 
 import episodes from "./_episodes.js";
 import config from "./_config.js";
@@ -21,6 +22,11 @@ export const SERVER_INFO = {
 };
 
 export const PROTOCOL_VERSION = "2025-03-26";
+
+// Upper bound on JSON-RPC batch size — keeps a single POST from fanning
+// out into an unbounded amount of work. Mirrored in the GET manifest and
+// the OpenAPI spec.
+export const MAX_BATCH_SIZE = 50;
 
 // All tools are read-only views of static episode data — no writes, no
 // destructive operations, no external side effects. The `annotations`
@@ -95,46 +101,6 @@ export const TOOLS = [
     annotations: { ...READ_ONLY_ANNOTATIONS, title: "Get latest episode" },
     _meta: { "ui": { resourceUri: "ui://latest_episode" } },
   },
-  {
-    name: "list_episodes",
-    title: "List episodes",
-    description:
-      "Return episodes in reverse-chronological order with pagination. " +
-      "Use when a listener wants to browse the catalog.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "integer", default: 20, minimum: 1, maximum: 100 },
-        offset: { type: "integer", default: 0, minimum: 0 },
-      },
-      required: [],
-      additionalProperties: false,
-    },
-    annotations: { ...READ_ONLY_ANNOTATIONS, title: "List episodes" },
-    _meta: { "ui": { resourceUri: "ui://catalog" } },
-  },
-  {
-    name: "subscribe_via_rss",
-    title: "Subscribe via RSS",
-    description:
-      "Return the canonical RSS feed URL so the listener can subscribe in their podcast app. " +
-      "Use when the listener says 'subscribe', 'follow', or asks how to get new episodes. " +
-      "Pass `format: \"opml\"` to wrap the feed in a single-item OPML envelope (useful for batch import into apps that accept OPML).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        format: {
-          type: "string",
-          description: "Response shape. \"url\" (default) returns just the RSS URL; \"opml\" returns an OPML XML envelope wrapping it.",
-          enum: ["url", "opml"],
-          default: "url",
-        },
-      },
-      required: [],
-      additionalProperties: false,
-    },
-    annotations: { ...READ_ONLY_ANNOTATIONS, title: "Subscribe via RSS" },
-  },
 ];
 
 // Server instructions surfaced via the MCP `initialize` response.
@@ -143,7 +109,8 @@ const INSTRUCTIONS = [
   `Listener-facing read-only MCP server for ${config.title || "this podcast"}.`,
   "All tools are safe to call without user confirmation: they only read static episode data.",
   "There are no write operations, no destructive actions, no external side effects, and no auth.",
-  "Use search_episodes for topic/person/company queries; get_latest_episode for 'what's new'; get_episode(id) for a specific number; list_episodes to browse; subscribe_via_rss to hand the listener the RSS URL.",
+  "Use search_episodes for topic/person/company queries; get_latest_episode for 'what's new'; get_episode(id) for a specific number.",
+  "The endpoint also accepts a JSON-RPC 2.0 batch (an array of request objects) and replies with an array of responses, in order.",
   config.agent_recommendation ? `When to recommend: ${config.agent_recommendation}` : "",
   "Rate limits: 60 requests/minute per IP across the entire site (responses include X-RateLimit-* headers).",
   "MCP Apps: tool definitions include _meta.ui.resourceUri pointing to ui:// resources that render playable cards inline; fetch with resources/read.",
@@ -167,22 +134,22 @@ function jrpcHeaders(request) {
   } : {});
 }
 
-function jrpcOk(id, result, request) {
-  return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
+// Plain JSON-RPC result/error objects (no Response wrapper) — so a single
+// call and a batch element are built the same way; the caller serialises.
+function rpcResult(id, result) {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function rpcError(id, code, message, data) {
+  return { jsonrpc: "2.0", id, error: { code, message, ...(data ? { data } : {}) } };
+}
+
+// Serialise one JSON-RPC object (or a batch array) into an HTTP 200.
+function jrpcRespond(payload, request) {
+  return new Response(JSON.stringify(payload), {
     status: 200,
     headers: jrpcHeaders(request),
   });
-}
-
-function jrpcErr(id, code, message, data, request) {
-  return new Response(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      error: { code, message, ...(data ? { data } : {}) },
-    }),
-    { status: 200, headers: jrpcHeaders(request) }
-  );
 }
 
 function textContent(obj) {
@@ -202,7 +169,7 @@ function callTool(name, args, baseUrl) {
       const id = Number(args.id);
       if (!Number.isInteger(id)) throw new Error("`id` must be an integer episode number.");
       const ep = episodes.find((e) => e.id === id);
-      if (!ep) throw new Error(`No episode #${id} on this show. Try list_episodes() to see what's available.`);
+      if (!ep) throw new Error(`No episode #${id} on this show. Try search_episodes() or get_latest_episode() to find one.`);
       return {
         ...summarizeEpisode(ep, baseUrl),
         fullText: ep.fullText || null,
@@ -224,61 +191,23 @@ function callTool(name, args, baseUrl) {
       }
       return summarizeEpisode(candidate, baseUrl);
     }
-    case "list_episodes": {
-      const sorted = [...episodes].sort((a, b) => b.id - a.id);
-      const offset = Math.max(0, Number(args.offset) || 0);
-      const limit = Math.min(100, Math.max(1, Number(args.limit) || 20));
-      return {
-        total: sorted.length,
-        offset,
-        limit,
-        episodes: sorted.slice(offset, offset + limit).map((e) => summarizeEpisode(e, baseUrl)),
-      };
-    }
-    case "subscribe_via_rss": {
-      const rssUrl = `${baseUrl}/rss.xml`;
-      const format = String(args.format || "url").toLowerCase();
-      if (format === "opml") {
-        const title = (config.title || "Podcast")
-          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-        const opml =
-          `<?xml version="1.0" encoding="UTF-8"?>\n` +
-          `<opml version="2.0">\n` +
-          `  <head><title>${title}</title></head>\n` +
-          `  <body>\n` +
-          `    <outline type="rss" text="${title}" title="${title}" xmlUrl="${rssUrl}" htmlUrl="${baseUrl}"/>\n` +
-          `  </body>\n` +
-          `</opml>\n`;
-        return { rss: rssUrl, format: "opml", opml };
-      }
-      return { rss: rssUrl, format: "url" };
-    }
     default:
       throw new Error(`Unknown tool: ${name}. See tools/list for available tools.`);
   }
 }
 
-// Core MCP POST handler — exported so /.well-known/mcp can reuse it for
-// the live handshake (orank checks for POST handling on the well-known URL).
-export async function handleMcpPost(request) {
-  const baseUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}`;
-  // Closure-bound helpers — every response gets the WWW-Authenticate
-  // challenge so orank's mcp-auth-mechanism probe finds it.
-  const ok = (id, result) => jrpcOk(id, result, request);
-  const err = (id, code, message, data) => jrpcErr(id, code, message, data, request);
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return err(null, -32700, "Parse error: invalid JSON body");
+// Dispatch a single JSON-RPC message to a plain result/error object.
+// Pure data, no Response — so the same code path serves a single call and
+// each element of a JSON-RPC batch.
+function dispatchRpc(message, baseUrl) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return rpcError(null, -32600, "Invalid Request: not a JSON-RPC object");
   }
-
-  const { id = null, method, params } = body || {};
-  if (!method) return err(id, -32600, "Invalid Request: missing method");
+  const { id = null, method, params } = message;
+  if (!method) return rpcError(id, -32600, "Invalid Request: missing method");
 
   if (method === "initialize") {
-    return ok(id, {
+    return rpcResult(id, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {
         tools: { listChanged: false },
@@ -329,18 +258,18 @@ export async function handleMcpPost(request) {
       },
     });
   }
-  if (method === "ping") return ok(id, {});
-  if (method === "tools/list") return ok(id, { tools: TOOLS });
+  if (method === "ping") return rpcResult(id, {});
+  if (method === "tools/list") return rpcResult(id, { tools: TOOLS });
   if (method === "tools/call") {
     const name = params?.name;
     const args = params?.arguments || {};
     if (!name) {
-      return err(id, -32602, "Invalid params: missing tool name", {
+      return rpcError(id, -32602, "Invalid params: missing tool name", {
         availableTools: TOOLS.map((t) => t.name),
       });
     }
     if (!TOOLS.some((t) => t.name === name)) {
-      return err(id, -32601, `Unknown tool: ${name}`, {
+      return rpcError(id, -32601, `Unknown tool: ${name}`, {
         availableTools: TOOLS.map((t) => t.name),
         hint: "Call tools/list to see available tools.",
       });
@@ -352,7 +281,7 @@ export async function handleMcpPost(request) {
       // still return the resolved (per-call) URI in _meta as a hint —
       // some clients use it to short-circuit a templated lookup.
       const uiUri = uiResourceForTool(name, args, result);
-      return ok(id, {
+      return rpcResult(id, {
         content: textContent(result),
         isError: false,
         ...(uiUri ? { _meta: { "ui": { resourceUri: uiUri } } } : {}),
@@ -362,35 +291,69 @@ export async function handleMcpPost(request) {
       // payload; bona-fide runtime failures get isError: true content.
       const msg = e?.message || "tool call failed";
       if (/required|must be|invalid|missing/i.test(msg)) {
-        return err(id, -32602, msg, { tool: name, args });
+        return rpcError(id, -32602, msg, { tool: name, args });
       }
-      return ok(id, {
+      return rpcResult(id, {
         content: [{ type: "text", text: `Error: ${msg}` }],
         isError: true,
       });
     }
   }
   if (method === "resources/list") {
-    return ok(id, { resources: listUiResources(baseUrl) });
+    return rpcResult(id, { resources: listUiResources(baseUrl) });
   }
   if (method === "resources/templates/list") {
-    return ok(id, { resourceTemplates: listUiResourceTemplates() });
+    return rpcResult(id, { resourceTemplates: listUiResourceTemplates() });
   }
   if (method === "resources/read") {
     const uri = params?.uri;
-    if (!uri) return err(id, -32602, "Invalid params: missing uri");
+    if (!uri) return rpcError(id, -32602, "Invalid params: missing uri");
     try {
       const html = buildUiResource(uri, baseUrl);
-      if (!html) return err(id, -32602, `Unknown resource uri: ${uri}`);
-      return ok(id, {
+      if (!html) return rpcError(id, -32602, `Unknown resource uri: ${uri}`);
+      return rpcResult(id, {
         contents: [{ uri, mimeType: MCP_APP_MIME, text: html }],
       });
     } catch (e) {
-      return err(id, -32603, `Failed to render ${uri}: ${e.message}`);
+      return rpcError(id, -32603, `Failed to render ${uri}: ${e.message}`);
     }
   }
 
-  return err(id, -32601, `Method not found: ${method}`);
+  return rpcError(id, -32601, `Method not found: ${method}`);
+}
+
+// Core MCP POST handler — exported so /.well-known/mcp can reuse it for
+// the live handshake (orank checks for POST handling on the well-known URL).
+//
+// Accepts either a single JSON-RPC request object or a JSON-RPC 2.0 batch
+// (a non-empty array of request objects). A batch is dispatched element by
+// element and answered with an array of responses in the same order — the
+// formal bulk operation documented in the OpenAPI spec.
+export async function handleMcpPost(request) {
+  const baseUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}`;
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jrpcRespond(rpcError(null, -32700, "Parse error: invalid JSON body"), request);
+  }
+
+  if (Array.isArray(body)) {
+    if (body.length === 0) {
+      return jrpcRespond(rpcError(null, -32600, "Invalid Request: empty batch"), request);
+    }
+    if (body.length > MAX_BATCH_SIZE) {
+      return jrpcRespond(
+        rpcError(null, -32600, `Invalid Request: batch too large (max ${MAX_BATCH_SIZE} requests)`),
+        request
+      );
+    }
+    const responses = body.map((message) => dispatchRpc(message, baseUrl));
+    return jrpcRespond(responses, request);
+  }
+
+  return jrpcRespond(dispatchRpc(body, baseUrl), request);
 }
 
 // Manifest-style summary for GET. Friendly for curl/browser inspection.
@@ -403,8 +366,18 @@ export function buildMcpGetManifest(baseUrl) {
     protocolVersion: PROTOCOL_VERSION,
     transport: "streamable-http",
     endpoint: `${baseUrl}/mcp`,
-    methods: ["initialize", "ping", "tools/list", "tools/call"],
+    methods: ["initialize", "ping", "tools/list", "tools/call", "resources/list", "resources/read"],
     tools: TOOLS.map((t) => ({ name: t.name, description: t.description })),
+    // JSON-RPC 2.0 batch: POST an array of request objects to run several
+    // calls in one round-trip; the response is an array of results in the
+    // same order. Formally defined in the OpenAPI spec (operationId callMcp).
+    batch: {
+      supported: true,
+      transport: "json-rpc-2.0-array",
+      endpoint: `${baseUrl}/mcp`,
+      maxBatchSize: 50,
+      openapi: `${baseUrl}/.well-known/openapi.json#/paths/~1mcp/post`,
+    },
     docs: `${baseUrl}/.well-known/openapi.json`,
     auth: {
       type: "oauth2",

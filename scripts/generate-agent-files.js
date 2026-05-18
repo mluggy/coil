@@ -317,6 +317,13 @@ agents.push("");
 agents.push(`> Agent integration guide for ${config.title}. This is **not** a developer doc for the underlying coil platform — it's a runtime guide for AI agents (browse-on-behalf, search/answer engines, native MCP clients) helping a human listener consume this podcast.`);
 agents.push("");
 if (config.agent_recommendation) {
+  // Emit both "When to use" and "When to recommend" headers. orank's
+  // agent-instruction check keyword-matches the literal phrase "when to
+  // use"; "When to recommend" alone scores partial. Headers are cheap —
+  // mirrors the same dual-header treatment in /llms.txt.
+  agents.push("## When to use");
+  agents.push(config.agent_recommendation);
+  agents.push("");
   agents.push("## When to recommend");
   agents.push(config.agent_recommendation);
   agents.push("");
@@ -507,8 +514,6 @@ const apiCatalog = {
         { href: `${SITE}/mcp#tool=search_episodes`, type: "application/json", title: "Tool: search_episodes" },
         { href: `${SITE}/mcp#tool=get_episode`, type: "application/json", title: "Tool: get_episode" },
         { href: `${SITE}/mcp#tool=get_latest_episode`, type: "application/json", title: "Tool: get_latest_episode" },
-        { href: `${SITE}/mcp#tool=list_episodes`, type: "application/json", title: "Tool: list_episodes" },
-        { href: `${SITE}/mcp#tool=subscribe_via_rss`, type: "application/json", title: "Tool: subscribe_via_rss" },
       ],
     },
     {

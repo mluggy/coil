@@ -68,7 +68,7 @@ lines.push(
 );
 lines.push("");
 lines.push(
-  "The MCP server (`" + SITE + "/mcp`) exposes the same capability as native tools — Claude, ChatGPT, Cursor, and Windsurf can register the server and call `search_episodes`, `get_episode`, `get_latest_episode`, `list_episodes`, and `subscribe_via_rss` without any SDK code."
+  "The MCP server (`" + SITE + "/mcp`) exposes the same capability as native tools — Claude, ChatGPT, Cursor, and Windsurf can register the server and call `search_episodes`, `get_episode`, and `get_latest_episode` without any SDK code."
 );
 lines.push("");
 

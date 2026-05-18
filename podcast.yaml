@@ -187,13 +187,14 @@ ratings:
   spotify: { rating: 0, reviews: 0 }
 
 # -- Custom FAQ entries (optional) --
-# Extra question/answer pairs appended to the JSON-LD FAQPage on the
-# homepage, on top of the auto-generated subscribe/pricing/language FAQs.
-# Each item needs a `q` and an `a`. Leave empty to emit only the
-# auto-generated FAQs.
-faqs: []
-#  - q: "Who is this podcast for?"
-#    a: "Anyone interested in the show's topics - no background required."
+# Question/answer pairs for the homepage JSON-LD FAQPage. If you set any,
+# they replace the built-in generic FAQs entirely. Leave commented out to
+# keep the defaults.
+# faqs:
+#   - q: "Who is this podcast for?"
+#     a: "Anyone interested in the show's topics."
+#   - q: "How often do new episodes come out?"
+#     a: "Every other week."
 
 # -- Social links --
 # Shown as icons in the site footer and included in JSON-LD sameAs.

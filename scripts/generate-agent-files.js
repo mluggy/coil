@@ -415,11 +415,15 @@ console.log("Generated public/AGENTS.md");
 const aiPlugin = {
   schema_version: "v1",
   name_for_human: config.title,
-  name_for_model: (config.title || "podcast")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 50),
+  // Slugify the title into an OpenAI model-name token ([a-z0-9_]). A
+  // fully non-Latin title (e.g. Hebrew) slugifies to an empty string, so
+  // fall back to "podcast" to keep name_for_model a valid, non-empty id.
+  name_for_model:
+    (config.title || "podcast")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 50) || "podcast",
   description_for_human:
     config.description ||
     `Search, browse, and listen to ${config.title} episodes.`,

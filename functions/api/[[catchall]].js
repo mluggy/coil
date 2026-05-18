@@ -116,14 +116,22 @@ function paymentRequiredResponse({ request }) {
   // PAYMENT-REQUIRED carries the Base64-encoded body so probing scanners
   // can decode the schema from the header alone (matches spree's pattern,
   // which orank scores 2/2 for x402-support).
-  const x402Payload = { x402Version: body.x402Version, accepts: body.accepts, error: body.error };
-  // `btoa` is Latin-1 only; titles can be Hebrew/RTL → TextEncoder first.
-  const x402Bytes = new TextEncoder().encode(JSON.stringify(x402Payload));
+  // HTTP header values are Latin-1 (ByteString) only, but the x402 payload
+  // carries `description` which embeds the show title — Hebrew/RTL titles
+  // would crash `new Headers()` and `btoa()`. PAYMENT-REQUIRED ships the
+  // UTF-8 bytes Base64-encoded; X-Payment-Required ships the same JSON with
+  // every non-ASCII char \u-escaped so it stays a valid header value.
+  const x402Json = JSON.stringify({ x402Version: body.x402Version, accepts: body.accepts, error: body.error });
+  const x402Bytes = new TextEncoder().encode(x402Json);
   const x402B64 = btoa(String.fromCharCode(...x402Bytes));
+  const x402JsonAscii = Array.from(x402Json, (c) => {
+    const code = c.charCodeAt(0);
+    return code < 128 ? c : "\\u" + code.toString(16).padStart(4, "0");
+  }).join("");
   const headers = new Headers(apiHeaders({
     "Cache-Control": "no-store",
     "PAYMENT-REQUIRED": x402B64,
-    "X-Payment-Required": JSON.stringify({ x402Version: body.x402Version, accepts: body.accepts, error: body.error }),
+    "X-Payment-Required": x402JsonAscii,
     "X-Payment-Protocol": body.x402Version === 2 ? "x402-v2" : "x402-v1",
     "Link": `<${baseUrl}/donate>; rel="payment"; type="application/json", <${baseUrl}/.well-known/x402/supported>; rel="x402"; type="application/json"`,
   }));

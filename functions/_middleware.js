@@ -531,6 +531,50 @@ function buildAgentJson(episode, baseUrl) {
       schema: "{ error: { code, message, hint, docs_url } }",
       statusCodes: [400, 402, 404, 405, 429, 500],
     },
+    streaming: {
+      ask: `${baseUrl}/ask — SSE (text/event-stream) when Accept: text/event-stream or Prefer: streaming=true.`,
+      mcp: `${baseUrl}/mcp — Streamable HTTP transport, server-sent events for long-running tools/call responses.`,
+      eventTypes: ["start", "result", "complete"],
+      rest: "Synchronous request / response on read endpoints — no streaming on /api/search or /episodes.json.",
+    },
+    idempotency: {
+      reads: "All public endpoints are read-only and idempotent by definition.",
+      writes: "No write endpoints today — donate / oauth flows are bounded by their own protocols.",
+    },
+    pagination: {
+      style: "cursor",
+      note: "Episode list is small and returned in full at /episodes.json today. If pagination is introduced, it will use cursor + limit query params.",
+    },
+    batch: {
+      style: "envelope",
+      note: "No batch endpoints today — episode counts make it unnecessary. The envelope shape ({ items: [...] } in, { results: [...] } out) is reserved for future bulk endpoints.",
+    },
+    sdks: {
+      note: "No published SDK — the public API surface is small (REST + MCP + ask) and easy to consume directly. RSS at /rss.xml for syndication.",
+    },
+    cli: {
+      available: false,
+      note: "No CLI today. /ask covers natural-language access; /api/search covers programmatic queries.",
+    },
+    tools: {
+      mcp: ["search_episodes", "get_episode", "get_latest_episode"],
+      ask: `${baseUrl}/ask — natural-language episode search`,
+      webmcp: `${baseUrl}/SKILL.md`,
+    },
+    compare: {
+      url: `${baseUrl}/compare.md`,
+      differentiators: [
+        "Free, no signup, no ads, no paywall",
+        "Full transcripts with chapter markers for every episode",
+        "Open agent-readiness surface (MCP server, /ask, SSE streaming, webmcp.js, full /.well-known/* stack)",
+        "Markdown alternates for every page (.md suffix and Accept: text/markdown)",
+      ],
+    },
+    signals: {
+      protocols: ["MCP", "WebMCP", "OAuth 2.0 + PKCE", "OpenAPI 3.0", "NLWeb", "ACP", "UCP", "x402", "MPP", "RFC 9598 RateLimit", "RFC 9421 Web Bot Auth", "RFC 8288 Link headers", "IETF AI Preferences (Content-Signal)"],
+      capabilities: ["browse_episodes", "search_transcripts", "ask_natural_language", "sse_streaming", "markdown_negotiation", "rss_syndication", "oauth_pkce", "cursor_pagination_ready"],
+      integration: ["rest", "mcp", "webmcp", "oauth", "ask", "tools", "agent", "skill", "rss"],
+    },
     agentInstructions: `${baseUrl}/AGENTS.md`,
     skill: `${baseUrl}/SKILL.md`,
     capabilities: [

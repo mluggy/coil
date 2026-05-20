@@ -3,6 +3,7 @@
 // small index sizes a podcast site produces.
 
 import episodes from "./_episodes.js";
+import config from "./_config.js";
 
 const STOP_WORDS = new Set([
   "the","a","an","and","or","but","is","are","was","were","be","been","being",
@@ -47,43 +48,102 @@ function buildSnippet(text, tokens, maxLen = 220) {
   return snippet.replace(/\s+/g, " ").trim();
 }
 
-export function searchEpisodes(query, { limit = 10, offset = 0, baseUrl = "" } = {}) {
-  const tokens = tokenize(query);
-  if (!tokens.length) return { results: [], total: 0 };
+// Episode-ID pre-pass for the search query. Pulls 1-5 digit numbers,
+// matches them against actual episode IDs, then strips those numbers,
+// the localized episode label (config.labels.episode — "Episode" /
+// "פרק" / etc.), a couple of English shortcuts, and the sNNeNN file
+// pattern so the remainder is clean text for full-text search. Lets
+// queries like "42", "episode 42", "פרק 42", or "ep 42" go straight
+// to ep 42, while "42 about AI" surfaces ep 42 first and searches
+// "about AI" through the normal scorer.
+function extractEpisodeIdHints(query, episodeIds, episodeLabel) {
+  const text = String(query || "");
+  const numbers = (text.match(/\d{1,5}/g) || []).map((n) => parseInt(n, 10));
+  const ids = numbers.filter((n) => episodeIds.has(n));
+  const labelSet = new Set(
+    [episodeLabel, "episode", "ep", "#"].filter(Boolean).map((t) => String(t).toLowerCase())
+  );
+  const remainder = text
+    .replace(/s\d+e\d+/giu, " ")
+    .replace(/#\d{1,5}\b/g, " ")
+    .split(/\s+/)
+    .filter((tok) => {
+      if (!tok) return false;
+      const clean = tok.toLowerCase();
+      if (labelSet.has(clean)) return false;
+      if (/^\d{1,5}$/.test(clean)) return false;
+      return true;
+    })
+    .join(" ")
+    .trim();
+  return { ids, remainder };
+}
 
-  const scored = [];
-  for (const ep of episodes) {
-    const title = (ep.title || "").toLowerCase();
-    const desc = (ep.desc || "").toLowerCase();
-    const text = (ep.fullText || "").toLowerCase();
-    let score = 0;
-    let matched = false;
-    for (const tok of tokens) {
-      const t = countMatches(title, tok);
-      const d = countMatches(desc, tok);
-      const x = countMatches(text, tok);
-      if (t + d + x > 0) matched = true;
-      score += t * 4 + d * 2 + x;
-    }
-    if (matched) {
-      scored.push({
-        id: ep.id,
-        title: ep.title,
-        date: ep.date || "",
-        season: ep.season,
-        duration: ep.duration || "",
-        url: baseUrl ? `${baseUrl}/${ep.id}` : `/${ep.id}`,
-        audio: baseUrl ? `${baseUrl}/${ep.audioFile}` : `/${ep.audioFile}`,
-        transcript: ep.hasSrt
-          ? (baseUrl ? `${baseUrl}/${ep.audioFile.replace(".mp3", ".txt")}` : `/${ep.audioFile.replace(".mp3", ".txt")}`)
-          : null,
-        score,
-        snippet: buildSnippet(ep.fullText || ep.desc || "", tokens),
-      });
-    }
+function buildHit(ep, baseUrl, score, snippet) {
+  return {
+    id: ep.id,
+    title: ep.title,
+    date: ep.date || "",
+    season: ep.season,
+    duration: ep.duration || "",
+    url: baseUrl ? `${baseUrl}/${ep.id}` : `/${ep.id}`,
+    audio: baseUrl ? `${baseUrl}/${ep.audioFile}` : `/${ep.audioFile}`,
+    transcript: ep.hasSrt
+      ? (baseUrl ? `${baseUrl}/${ep.audioFile.replace(".mp3", ".txt")}` : `/${ep.audioFile.replace(".mp3", ".txt")}`)
+      : null,
+    score,
+    snippet,
+  };
+}
+
+export function searchEpisodes(query, { limit = 10, offset = 0, baseUrl = "" } = {}) {
+  const episodeIds = new Set(episodes.map((e) => e.id));
+  const { ids: idHits, remainder } = extractEpisodeIdHints(
+    query,
+    episodeIds,
+    config.labels && config.labels.episode
+  );
+  const tokens = tokenize(remainder);
+  if (!idHits.length && !tokens.length) return { results: [], total: 0 };
+
+  // Direct ID matches first, in query order, deduped. Sentinel score so
+  // they always sort above text hits even when merged.
+  const seen = new Set();
+  const results = [];
+  for (const id of idHits) {
+    if (seen.has(id)) continue;
+    const ep = episodes.find((e) => e.id === id);
+    if (!ep) continue;
+    seen.add(id);
+    results.push(buildHit(ep, baseUrl, Number.MAX_SAFE_INTEGER, ep.desc || ""));
   }
-  scored.sort((a, b) => b.score - a.score);
-  return { results: scored.slice(offset, offset + limit), total: scored.length };
+
+  // Full-text score on the remainder, skipping anything already matched by id.
+  if (tokens.length) {
+    const scored = [];
+    for (const ep of episodes) {
+      if (seen.has(ep.id)) continue;
+      const title = (ep.title || "").toLowerCase();
+      const desc = (ep.desc || "").toLowerCase();
+      const text = (ep.fullText || "").toLowerCase();
+      let score = 0;
+      let matched = false;
+      for (const tok of tokens) {
+        const t = countMatches(title, tok);
+        const d = countMatches(desc, tok);
+        const x = countMatches(text, tok);
+        if (t + d + x > 0) matched = true;
+        score += t * 4 + d * 2 + x;
+      }
+      if (matched) {
+        scored.push(buildHit(ep, baseUrl, score, buildSnippet(ep.fullText || ep.desc || "", tokens)));
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    results.push(...scored);
+  }
+
+  return { results: results.slice(offset, offset + limit), total: results.length };
 }
 
 export function summarizeEpisode(ep, baseUrl = "") {

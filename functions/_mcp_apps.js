@@ -47,29 +47,20 @@ function escCspAttr(s) {
 // Content-Security-Policy for the MCP App document. MCP clients render
 // these cards inside a sandboxed iframe, so the policy ships as a
 // <meta http-equiv> — there is no HTTP response of our own to carry a
-// header. Scoped per agent-readiness audits: no `*`, no permissive
-// default-src. The show's own origin is listed explicitly because a
-// srcdoc iframe has an opaque origin, so `'self'` alone would not match
-// the cover-art / audio URLs. GA origins mirror the main-site CSP and
-// appear only when the show configures a measurement id.
+// header. Scoped per agent-readiness audits (orank's mcp-view-csp
+// check): no wildcard origins, no permissive default-src. The show's
+// own origin is listed explicitly because a srcdoc iframe has an
+// opaque origin, so `'self'` alone would not match the cover-art /
+// audio URLs. The card body is pure static HTML — no GA, no third-
+// party scripts — so the asset directives stay tight at `'self'`.
 function buildAppCsp(baseUrl) {
   const origin = baseUrl || "";
-  const scriptSrc = ["'self'"];
   const connectSrc = ["'self'", origin].filter(Boolean);
   const imgSrc = ["'self'", origin, "data:"].filter(Boolean);
   const mediaSrc = ["'self'", origin].filter(Boolean);
-  if (config.ga_measurement_id) {
-    scriptSrc.push("https://*.googletagmanager.com");
-    connectSrc.push(
-      "https://*.google-analytics.com",
-      "https://*.analytics.google.com",
-      "https://*.googletagmanager.com"
-    );
-    imgSrc.push("https://*.google-analytics.com", "https://*.googletagmanager.com");
-  }
   return [
     "default-src 'none'",
-    `script-src ${scriptSrc.join(" ")}`,
+    "script-src 'self'",
     "style-src 'unsafe-inline'",
     `img-src ${imgSrc.join(" ")}`,
     `media-src ${mediaSrc.join(" ")}`,

@@ -44,23 +44,110 @@ function escCspAttr(s) {
     .replace(/"/g, "&quot;");
 }
 
+// Per-pixel origin lists, gated on the analytics ids actually configured
+// in podcast.yaml. Used in both surfaces below: the structured
+// `_meta.ui.csp` (connectDomains / resourceDomains) the host applies to
+// the sandbox iframe, and the inline `<meta http-equiv>` parsed by the
+// browser. Origins are vendor-documented (not wildcard-anything):
+//   GA4         developers.google.com/tag-platform/security/guides/csp
+//   Meta Pixel  Facebook Pixel CSP docs / Marco Aures roundup
+//   X / Twitter business.x.com — uwt.js conversion tracking CSP
+//   LinkedIn    linkedin.com/help/lms/answer/a425696
+//   Clarity     learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-csp
+//   UET (Bing)  help.ads.microsoft.com/apex/index/3/en/60174
+//   TikTok      analytics.tiktok.com (single host)
+//   Snap Pixel  sc-static.net + tr.snapchat.com
+function analyticsDomains() {
+  const connect = [];
+  const script = [];
+  const img = [];
+
+  if (config.ga_measurement_id) {
+    script.push("https://www.googletagmanager.com");
+    connect.push(
+      "https://*.google-analytics.com",
+      "https://*.analytics.google.com",
+      "https://*.googletagmanager.com"
+    );
+    img.push("https://*.google-analytics.com", "https://www.googletagmanager.com");
+  }
+  if (config.fb_pixel_id) {
+    script.push("https://connect.facebook.net");
+    connect.push("https://www.facebook.com");
+    img.push("https://www.facebook.com");
+  }
+  if (config.x_pixel_id) {
+    script.push("https://static.ads-twitter.com");
+    connect.push(
+      "https://ads-twitter.com",
+      "https://ads-api.twitter.com",
+      "https://analytics.twitter.com"
+    );
+    img.push("https://t.co", "https://analytics.twitter.com", "https://ads-twitter.com");
+  }
+  if (config.linkedin_partner_id) {
+    script.push("https://snap.licdn.com");
+    connect.push(
+      "https://px.ads.linkedin.com",
+      "https://px4.ads.linkedin.com",
+      "https://dc.ads.linkedin.com"
+    );
+    img.push("https://px.ads.linkedin.com", "https://px4.ads.linkedin.com");
+  }
+  if (config.clarity_project_id) {
+    // Clarity load-balances across [a-z].clarity.ms — the wildcard is
+    // documented and necessary; c.bing.com handles the conversion
+    // ingestion endpoint.
+    script.push("https://*.clarity.ms", "https://c.bing.com");
+    connect.push("https://*.clarity.ms", "https://c.bing.com");
+  }
+  if (config.microsoft_uet_id) {
+    script.push("https://bat.bing.com", "https://bat.bing.net");
+    connect.push("https://bat.bing.com", "https://bat.bing.net");
+    img.push("https://bat.bing.com", "https://bat.bing.net");
+  }
+  if (config.tiktok_pixel_id) {
+    script.push("https://analytics.tiktok.com");
+    connect.push("https://analytics.tiktok.com");
+    img.push("https://analytics.tiktok.com");
+  }
+  if (config.snap_pixel_id) {
+    script.push("https://sc-static.net");
+    connect.push("https://tr.snapchat.com", "https://sc-static.net");
+    img.push("https://tr.snapchat.com");
+  }
+
+  const uniq = (arr) => Array.from(new Set(arr));
+  return {
+    connect: uniq(connect),
+    script: uniq(script),
+    img: uniq(img),
+    // _meta.ui.csp.resourceDomains is a single bucket that the host fans
+    // out to script-src / img-src / style-src / font-src / media-src, so
+    // it has to be the union of every vendor's script + image origins.
+    resource: uniq([...script, ...img]),
+  };
+}
+
 // Content-Security-Policy for the MCP App document. MCP clients render
 // these cards inside a sandboxed iframe, so the policy ships as a
 // <meta http-equiv> — there is no HTTP response of our own to carry a
 // header. Scoped per agent-readiness audits (orank's mcp-view-csp
-// check): no wildcard origins, no permissive default-src. The show's
-// own origin is listed explicitly because a srcdoc iframe has an
-// opaque origin, so `'self'` alone would not match the cover-art /
-// audio URLs. The card body is pure static HTML — no GA, no third-
-// party scripts — so the asset directives stay tight at `'self'`.
+// check): no wildcard `*`, no permissive default-src. The show's own
+// origin is listed explicitly because a srcdoc iframe has an opaque
+// origin, so `'self'` alone would not match the cover-art / audio URLs.
+// Analytics origins are added only when the corresponding id is set in
+// podcast.yaml — mirrors the main-site CSP for consistency.
 function buildAppCsp(baseUrl) {
   const origin = baseUrl || "";
-  const connectSrc = ["'self'", origin].filter(Boolean);
-  const imgSrc = ["'self'", origin, "data:"].filter(Boolean);
+  const { connect, script, img } = analyticsDomains();
+  const scriptSrc = ["'self'", ...script];
+  const imgSrc = ["'self'", origin, "data:", ...img].filter(Boolean);
   const mediaSrc = ["'self'", origin].filter(Boolean);
+  const connectSrc = ["'self'", origin, ...connect].filter(Boolean);
   return [
     "default-src 'none'",
-    "script-src 'self'",
+    `script-src ${scriptSrc.join(" ")}`,
     "style-src 'unsafe-inline'",
     `img-src ${imgSrc.join(" ")}`,
     `media-src ${mediaSrc.join(" ")}`,
@@ -224,38 +311,85 @@ function catalogCard(baseUrl, limit = 12) {
 </div>`.trim();
 }
 
+// Sandbox CSP for ui:// resources, per the MCP Apps spec
+// (modelcontextprotocol/ext-apps, 2026-01-26 — SEP-1865). The host
+// (ChatGPT / Claude.ai / VS Code / …) reads `_meta.ui.csp` from each
+// resource and builds the sandbox iframe's CSP from these four fields.
+// The spec exposes exactly:
+//   connectDomains   → connect-src
+//   resourceDomains  → img-src / script-src / style-src / font-src / media-src
+//   frameDomains     → frame-src
+//   baseUriDomains   → base-uri
+// Empty / omitted means "blocked" (secure default). The card body only
+// loads its own origin's cover art + audio and makes no nested frames or
+// outbound fetches, so the show origin is listed once for connect + asset
+// loads and the other two arrays stay empty.
+// `openai/widgetCSP` (snake_case) is the ChatGPT Apps SDK extension that
+// some published-mode apps need alongside the standard fields.
+export function buildUiCspMeta(baseUrl) {
+  const origin = baseUrl || "";
+  const { connect, resource } = analyticsDomains();
+  const connectDomains = Array.from(
+    new Set([...(origin ? [origin] : []), ...connect])
+  );
+  const resourceDomains = Array.from(
+    new Set([...(origin ? [origin] : []), ...resource])
+  );
+  return {
+    ui: {
+      csp: {
+        connectDomains,
+        resourceDomains,
+        frameDomains: [],
+        baseUriDomains: [],
+      },
+    },
+    "openai/widgetCSP": {
+      connect_domains: connectDomains,
+      resource_domains: resourceDomains,
+    },
+  };
+}
+
 // ─── MCP method implementations ─────────────────────────────────────────
-export function listUiResources(/* baseUrl */) {
-  // Concrete (non-template) ui:// resources.
+export function listUiResources(baseUrl) {
+  // Concrete (non-template) ui:// resources. `_meta.ui.csp` declares
+  // the sandbox CSP per the MCP Apps spec.
+  const _meta = buildUiCspMeta(baseUrl);
   return [
     {
       uri: "ui://latest_episode",
       name: "Latest episode card",
       description: "A playable card with cover, title, audio control, and subscribe links for the most recent episode.",
       mimeType: MCP_APP_MIME,
+      _meta,
     },
     {
       uri: "ui://catalog",
       name: "Episode catalog card",
       description: "A list of recent episodes with titles, dates, and short descriptions.",
       mimeType: MCP_APP_MIME,
+      _meta,
     },
   ];
 }
 
-export function listUiResourceTemplates() {
+export function listUiResourceTemplates(baseUrl) {
+  const _meta = buildUiCspMeta(baseUrl);
   return [
     {
       uriTemplate: "ui://episode/{id}",
       name: "Episode card by id",
       description: "Playable card for a specific episode.",
       mimeType: MCP_APP_MIME,
+      _meta,
     },
     {
       uriTemplate: "ui://search?q={query}&limit={limit}",
       name: "Search results card",
       description: "Themed list of episode matches for a search query.",
       mimeType: MCP_APP_MIME,
+      _meta,
     },
   ];
 }

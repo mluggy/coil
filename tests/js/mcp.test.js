@@ -167,6 +167,50 @@ describe("tools/call validation", () => {
   });
 });
 
+describe("MCP Apps structured CSP (_meta.ui.csp per spec)", () => {
+  it("attaches the four CSP fields on resources/list entries", async () => {
+    const r = await rpcJson({ jsonrpc: "2.0", id: 30, method: "resources/list" });
+    const res = r.result.resources[0];
+    expect(res._meta).toBeTruthy();
+    const csp = res._meta.ui && res._meta.ui.csp;
+    expect(csp).toBeTruthy();
+    // Spec-mandated field names (camelCase) and shapes.
+    expect(Array.isArray(csp.connectDomains)).toBe(true);
+    expect(Array.isArray(csp.resourceDomains)).toBe(true);
+    expect(Array.isArray(csp.frameDomains)).toBe(true);
+    expect(Array.isArray(csp.baseUriDomains)).toBe(true);
+    // Show origin shows up where it should.
+    expect(csp.connectDomains).toContain("https://example.test");
+    expect(csp.resourceDomains).toContain("https://example.test");
+    // Frames + base-uri stay empty by default (no nested iframes, base 'self').
+    expect(csp.frameDomains).toEqual([]);
+    expect(csp.baseUriDomains).toEqual([]);
+    // ChatGPT Apps SDK snake_case variant for the same intent.
+    const widgetCsp = res._meta["openai/widgetCSP"];
+    expect(widgetCsp).toBeTruthy();
+    expect(widgetCsp.connect_domains).toContain("https://example.test");
+    expect(widgetCsp.resource_domains).toContain("https://example.test");
+  });
+
+  it("attaches the same _meta on resources/read content items", async () => {
+    const r = await rpcJson({
+      jsonrpc: "2.0",
+      id: 31,
+      method: "resources/read",
+      params: { uri: "ui://catalog" },
+    });
+    const item = r.result.contents[0];
+    expect(item._meta?.ui?.csp?.connectDomains).toContain("https://example.test");
+    expect(item._meta?.ui?.csp?.resourceDomains).toContain("https://example.test");
+  });
+
+  it("attaches _meta on resources/templates/list entries too", async () => {
+    const r = await rpcJson({ jsonrpc: "2.0", id: 32, method: "resources/templates/list" });
+    const tpl = r.result.resourceTemplates[0];
+    expect(tpl._meta?.ui?.csp?.connectDomains).toContain("https://example.test");
+  });
+});
+
 describe("MCP App view CSP (resources/read)", () => {
   let html;
   beforeAll(async () => {

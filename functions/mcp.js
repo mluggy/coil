@@ -14,7 +14,7 @@ import episodes from "./_episodes.js";
 import config from "./_config.js";
 import { searchEpisodes, summarizeEpisode } from "./_search.js";
 import { apiHeaders, corsPreflight, errors } from "./_api.js";
-import { buildUiResource, listUiResources, listUiResourceTemplates, uiResourceForTool, MCP_APP_MIME } from "./_mcp_apps.js";
+import { buildUiResource, listUiResources, listUiResourceTemplates, uiResourceForTool, MCP_APP_MIME, buildUiCspMeta } from "./_mcp_apps.js";
 
 export const SERVER_INFO = {
   name: "coil-podcast-mcp",
@@ -326,7 +326,7 @@ function dispatchRpc(message, baseUrl) {
     return rpcResult(id, { resources: listUiResources(baseUrl) });
   }
   if (method === "resources/templates/list") {
-    return rpcResult(id, { resourceTemplates: listUiResourceTemplates() });
+    return rpcResult(id, { resourceTemplates: listUiResourceTemplates(baseUrl) });
   }
   if (method === "resources/read") {
     const uri = params?.uri;
@@ -334,8 +334,17 @@ function dispatchRpc(message, baseUrl) {
     try {
       const html = buildUiResource(uri, baseUrl);
       if (!html) return rpcError(id, -32602, `Unknown resource uri: ${uri}`);
+      // Per MCP Apps spec, the sandbox CSP travels alongside the resource
+      // content as `_meta.ui.csp` so the host can apply it to the iframe.
       return rpcResult(id, {
-        contents: [{ uri, mimeType: MCP_APP_MIME, text: html }],
+        contents: [
+          {
+            uri,
+            mimeType: MCP_APP_MIME,
+            text: html,
+            _meta: buildUiCspMeta(baseUrl),
+          },
+        ],
       });
     } catch (e) {
       return rpcError(id, -32603, `Failed to render ${uri}: ${e.message}`);

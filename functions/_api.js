@@ -24,15 +24,27 @@ export const ERROR_DOCS_URL = "/api/llms.txt";
 export const API_VERSION = "2026-05-18";
 
 function rateLimitHeaders() {
-  // Reset = next minute boundary in Unix seconds.
-  const reset = Math.ceil(Date.now() / 60000) * 60;
+  // We don't track per-IP usage in code; `Remaining` mirrors the limit
+  // because we never deny. Cloudflare edge rate-limit rules (configured
+  // in the dashboard) are the actual enforcement layer.
+  //
+  // Emit both the IETF / RFC 9598 names (no `X-` prefix) and the legacy
+  // `X-RateLimit-*` names — orank's rate-limit-headers check looks for
+  // RFC 9598, and many existing clients only understand the legacy names.
+  const now = Date.now();
+  const resetUnix = Math.ceil(now / 60000) * 60;
+  const resetDelta = Math.max(0, resetUnix - Math.floor(now / 1000));
+  const limit = String(RATE_LIMIT_PER_MIN);
   return {
-    "X-RateLimit-Limit": String(RATE_LIMIT_PER_MIN),
-    // We don't track per-IP usage in code; remaining mirrors the limit
-    // because we never deny. Cloudflare edge rate-limit rules (configured
-    // in the dashboard) are the actual enforcement layer.
-    "X-RateLimit-Remaining": String(RATE_LIMIT_PER_MIN),
-    "X-RateLimit-Reset": String(reset),
+    // RFC 9598 — Reset is delta-seconds until the next window.
+    "RateLimit-Limit": limit,
+    "RateLimit-Remaining": limit,
+    "RateLimit-Reset": String(resetDelta),
+    "RateLimit-Policy": `${RATE_LIMIT_PER_MIN};w=60`,
+    // Legacy X-* equivalents — Reset is the Unix timestamp.
+    "X-RateLimit-Limit": limit,
+    "X-RateLimit-Remaining": limit,
+    "X-RateLimit-Reset": String(resetUnix),
   };
 }
 
@@ -42,6 +54,7 @@ function corsHeaders() {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Prefer",
     "Access-Control-Expose-Headers":
+      "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, RateLimit-Policy, " +
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After, API-Version",
   };
 }

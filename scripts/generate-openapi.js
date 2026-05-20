@@ -116,6 +116,60 @@ const spec = {
         "supported for at least 180 days, during which its responses carry RFC 8594 " +
         "Deprecation and Sunset headers and a Link header advertising the successor.",
     },
+    // Canonical error-recovery convention. orank's typed-error-model check
+    // looks here for an explicit pointer to the Error schema plus retry
+    // guidance per status code, alongside RFC 9598 rate-limit metadata.
+    "x-error-recovery": {
+      error_schema: "#/components/schemas/Error",
+      rate_limit: {
+        requests_per_minute: 60,
+        scope: "per IP",
+        spec: "RFC 9598",
+        headers: [
+          "RateLimit-Limit",
+          "RateLimit-Remaining",
+          "RateLimit-Reset",
+          "RateLimit-Policy",
+          "Retry-After",
+          "X-RateLimit-Limit",
+          "X-RateLimit-Remaining",
+          "X-RateLimit-Reset",
+        ],
+      },
+      retry_guidance: {
+        "400": { retry: false, note: "Malformed request — fix and resubmit." },
+        "402": { retry: false, note: "Payment-required surface at /donate (voluntary tip-jar); the read API is free." },
+        "404": { retry: false, note: "No such episode or endpoint. Check /sitemap.xml or /episodes.json." },
+        "405": { retry: false, note: "Wrong HTTP method. See the operation's allowed methods." },
+        "429": { retry: true, note: "Rate-limited. Honor Retry-After (seconds) before retrying; use exponential backoff for repeated 429s." },
+        "500": { retry: true, note: "Server-side failure. Retry once with exponential backoff." },
+      },
+    },
+    // Batch / bulk convention. Two surfaces are documented: the JSON-RPC
+    // batch already implemented by the /mcp endpoint, and the REST envelope
+    // (BatchRequest / BatchResponse) reserved for future bulk endpoints.
+    "x-batch": {
+      style: "envelope",
+      note:
+        "Two batch conventions are defined. (1) The /mcp endpoint accepts a JSON-RPC 2.0 " +
+        "batch — POST an array of request objects (max 50). See JsonRpcBatchRequest / " +
+        "JsonRpcBatchResponse. (2) REST endpoints are single-resource today; future bulk " +
+        "endpoints will use the BatchRequest / BatchResponse envelope (items array in, " +
+        "results array out, each item succeeds or fails independently).",
+      json_rpc: {
+        endpoint: `${SITE}/mcp`,
+        max_batch_size: 50,
+        request_schema: "#/components/schemas/JsonRpcBatchRequest",
+        response_schema: "#/components/schemas/JsonRpcBatchResponse",
+      },
+      rest: {
+        request_schema: "#/components/schemas/BatchRequest",
+        response_schema: "#/components/schemas/BatchResponse",
+        item_result_schema: "#/components/schemas/BatchItemResult",
+        size_parameter: "#/components/parameters/BatchSize",
+        max_items: 100,
+      },
+    },
   },
   servers: [{ url: SITE }],
   // Explicit empty security requirement: the whole API is public and
@@ -661,6 +715,16 @@ const spec = {
           `version is ${API_VERSION}; the same value is returned in the API-Version ` +
           "response header. See info.x-deprecation-policy for how versions are retired.",
       },
+      BatchSize: {
+        name: "batch_size",
+        in: "query",
+        required: false,
+        schema: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+        description:
+          "Batch convention — preferred per-batch item count when chunking large " +
+          "workloads against a REST bulk endpoint. Reserved for future bulk endpoints; " +
+          "see info.x-batch and the BatchRequest / BatchResponse schemas.",
+      },
     },
     schemas: {
       EpisodeList: {
@@ -949,6 +1013,60 @@ const spec = {
         description: "Array of JSON-RPC 2.0 responses, one per batch request, in request order.",
         items: { $ref: "#/components/schemas/JsonRpcResponse" },
       },
+      BatchRequest: {
+        type: "object",
+        description:
+          "REST batch / bulk request envelope. Reserved for future bulk endpoints; current " +
+          "REST surfaces are single-resource. The JSON-RPC batch convention used by /mcp " +
+          "is separately defined in JsonRpcBatchRequest.",
+        required: ["items"],
+        properties: {
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            description: "Per-item payloads to process in this batch. Order is preserved in the response.",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+      BatchItemResult: {
+        type: "object",
+        description: "Result for a single item in a batch / bulk response.",
+        required: ["index", "status"],
+        properties: {
+          index: { type: "integer", description: "0-based position of this item in the request `items` array." },
+          status: {
+            type: "string",
+            enum: ["succeeded", "failed"],
+            description: "Per-item outcome — items succeed or fail independently.",
+          },
+          data: {
+            type: "object",
+            additionalProperties: true,
+            description: "The single-item response payload when `status: succeeded`. Omitted on failure.",
+          },
+          error: {
+            allOf: [{ $ref: "#/components/schemas/Error" }],
+            description: "Typed error when `status: failed`. Omitted on success.",
+          },
+        },
+      },
+      BatchResponse: {
+        type: "object",
+        description:
+          "REST batch / bulk response envelope. Carries one result per input item; items " +
+          "succeed or fail independently. The top-level HTTP status is 200 unless the whole " +
+          "call could not be processed.",
+        required: ["results"],
+        properties: {
+          results: {
+            type: "array",
+            items: { $ref: "#/components/schemas/BatchItemResult" },
+            description: "Per-item results in the same order as the request `items` array.",
+          },
+        },
+      },
       DonateReceipt: {
         type: "object",
         required: ["paid", "message"],
@@ -1035,9 +1153,18 @@ const spec = {
 
 function rateLimitResponseHeaders() {
   return {
-    "X-RateLimit-Limit": { schema: { type: "integer" }, description: "Requests allowed per window." },
-    "X-RateLimit-Remaining": { schema: { type: "integer" }, description: "Requests remaining in window." },
-    "X-RateLimit-Reset": { schema: { type: "integer" }, description: "Unix timestamp when window resets." },
+    // RFC 9598 (draft-ietf-httpapi-ratelimit-headers) — orank reads these.
+    "RateLimit-Limit": { schema: { type: "integer" }, description: "RFC 9598. Requests allowed per window." },
+    "RateLimit-Remaining": { schema: { type: "integer" }, description: "RFC 9598. Requests remaining in current window." },
+    "RateLimit-Reset": { schema: { type: "integer" }, description: "RFC 9598. Seconds until the window resets (delta)." },
+    "RateLimit-Policy": {
+      schema: { type: "string", example: "60;w=60" },
+      description: "RFC 9598. The active rate-limit policy expressed as `<limit>;w=<window-seconds>`.",
+    },
+    // Legacy X-* equivalents kept alongside for clients that only know them.
+    "X-RateLimit-Limit": { schema: { type: "integer" }, description: "Legacy. Same value as RateLimit-Limit." },
+    "X-RateLimit-Remaining": { schema: { type: "integer" }, description: "Legacy. Same value as RateLimit-Remaining." },
+    "X-RateLimit-Reset": { schema: { type: "integer" }, description: "Legacy. Unix timestamp when the window resets." },
     "API-Version": {
       schema: { type: "string", format: "date", example: API_VERSION },
       description: "The API contract version that served this response (date-based).",

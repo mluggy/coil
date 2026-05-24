@@ -362,9 +362,39 @@ async function handleAuthorize({ request, baseUrl }) {
 // ─── /oauth/register (RFC 7591 dynamic client registration) ───────────────
 // Anyone can "register" — we just hand back the public client id. Useful
 // for MCP clients that probe for dynamic registration before connecting.
+//
+// GET returns the registration_templates list (workos.com/auth-md/docs/apps).
+// An agent that walks the auth.md GET-only chain — auth.md → PRM → AS →
+// templates — fetches this endpoint to select a template before POSTing.
 async function handleRegister({ request, baseUrl }) {
+  if (request.method === "GET" || request.method === "HEAD") {
+    return new Response(
+      JSON.stringify(
+        {
+          registration_endpoint: `${baseUrl}/oauth/register`,
+          registration_endpoint_methods_supported: ["GET", "POST"],
+          identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+          // The same templates inlined in the AS metadata, so an agent
+          // that hits this endpoint directly (rather than walking from
+          // the AS doc) still gets the full template inventory.
+          templates: REGISTRATION_TEMPLATES(baseUrl),
+          auth_md: `${baseUrl}/auth.md`,
+          skill: `${baseUrl}/.well-known/agent-skills/use-agent-auth/SKILL.md`,
+        },
+        null,
+        2
+      ),
+      {
+        status: 200,
+        headers: apiHeaders({
+          "Cache-Control": "public, max-age=3600",
+          Link: `<${baseUrl}/auth.md>; rel="describedby"; type="text/markdown"`,
+        }),
+      }
+    );
+  }
   if (request.method !== "POST") {
-    return apiError({ status: 405, code: "method_not_allowed", message: "POST only." });
+    return apiError({ status: 405, code: "method_not_allowed", message: "GET, POST only." });
   }
   const body = await request.json().catch(() => ({}));
   return new Response(
@@ -373,14 +403,85 @@ async function handleRegister({ request, baseUrl }) {
       client_id_issued_at: Math.floor(Date.now() / 1000),
       client_secret: null,
       token_endpoint_auth_method: "none",
-      grant_types: ["authorization_code", "client_credentials", "refresh_token"],
+      grant_types: [
+        "authorization_code",
+        "client_credentials",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      ],
       response_types: ["code"],
       redirect_uris: body.redirect_uris || [],
       scope: SCOPES.join(" "),
       application_type: body.application_type || "native",
+      // Echo the user_email if the agent picked the user-email-app
+      // template, so a follow-up identity_assertion can be bound to it.
+      ...(body.user_email ? { user_email: body.user_email } : {}),
     }),
     { status: 201, headers: apiHeaders({ "Cache-Control": "no-store" }) }
   );
+}
+
+// Templates live in functions/oauth so GET /oauth/register can serve them
+// without parsing the static AS metadata file. Keep parity with the
+// REGISTRATION_TEMPLATES constant in scripts/generate-oauth.js.
+function REGISTRATION_TEMPLATES(baseUrl) {
+  const scopeStr = SCOPES.join(" ");
+  return [
+    {
+      id: "anonymous-public-client",
+      identity_type: "anonymous",
+      name: "Anonymous public client",
+      description:
+        "Default zero-friction registration. Returns the pre-issued public client id. " +
+        "Suitable when the agent has no user identity to bind to.",
+      method: "POST",
+      uri: `${baseUrl}/oauth/register`,
+      content_type: "application/json",
+      request_body_template: {
+        redirect_uris: ["{{your_redirect_uri}}"],
+        application_type: "native",
+      },
+      required_fields: [],
+      optional_fields: ["redirect_uris", "application_type"],
+    },
+    {
+      id: "user-email-app",
+      identity_type: "identity_assertion",
+      name: "User-email app (workos.com/auth-md/docs/apps)",
+      description:
+        "Registration template for an app acting on behalf of a single user. " +
+        "The agent supplies the user's email and a redirect_uri; the AS binds " +
+        "the issued identity_assertion subject to that email.",
+      method: "POST",
+      uri: `${baseUrl}/oauth/register`,
+      content_type: "application/json",
+      request_body_template: {
+        user_email: "{{user_email}}",
+        redirect_uris: ["{{your_redirect_uri}}"],
+        application_type: "web",
+        scope: scopeStr,
+      },
+      required_fields: ["user_email"],
+      optional_fields: ["redirect_uris", "application_type", "scope"],
+    },
+    {
+      id: "service-account",
+      identity_type: "client_credentials",
+      name: "Service account (M2M)",
+      description:
+        "Registration template for a non-interactive backend agent. " +
+        "Uses client_credentials grant against the same public client id.",
+      method: "POST",
+      uri: `${baseUrl}/oauth/register`,
+      content_type: "application/json",
+      request_body_template: {
+        application_type: "service",
+        scope: scopeStr,
+      },
+      required_fields: [],
+      optional_fields: ["application_type", "scope"],
+    },
+  ];
 }
 
 // ─── /oauth/claim (WorkOS auth.md identity_assertion) ────────────────────

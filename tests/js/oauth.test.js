@@ -215,6 +215,50 @@ describe("/oauth/register (RFC 7591)", () => {
     expect(body.token_endpoint_auth_method).toBe("none");
     expect(body.redirect_uris).toEqual(["https://app.example/cb"]);
   });
+
+  it("echoes user_email when the user-email-app template is used", async () => {
+    const resp = await call("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_email: "alice@example.test",
+        redirect_uris: ["https://app.example/cb"],
+        application_type: "web",
+      }),
+    });
+    expect(resp.status).toBe(201);
+    const body = await json(resp);
+    expect(body.user_email).toBe("alice@example.test");
+    expect(body.grant_types).toContain("urn:ietf:params:oauth:grant-type:jwt-bearer");
+  });
+
+  it("GET returns the registration_templates inventory (auth.md GET-only path)", async () => {
+    const resp = await call("/oauth/register", { method: "GET" });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.registration_endpoint_methods_supported).toEqual(
+      expect.arrayContaining(["GET", "POST"])
+    );
+    expect(body.identity_types_supported).toEqual(
+      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+    );
+    const ids = body.templates.map((t) => t.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "anonymous-public-client",
+        "user-email-app",
+        "service-account",
+      ]),
+    );
+    // user-email-app template must surface user_email in the request body
+    // template + mark it required — that's how an agent with only an
+    // email selects this template.
+    const email = body.templates.find((t) => t.id === "user-email-app");
+    expect(email.required_fields).toContain("user_email");
+    expect(email.request_body_template.user_email).toBe("{{user_email}}");
+    expect(body.auth_md).toMatch(/\/auth\.md$/);
+    expect(body.skill).toMatch(/use-agent-auth\/SKILL\.md$/);
+  });
 });
 
 describe("/oauth/jwks.json", () => {

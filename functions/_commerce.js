@@ -49,6 +49,33 @@ function commerceError(status, code, message, extra = {}) {
   return json({ error: { code, message } }, status, extra);
 }
 
+// ACP-shaped problem document. OpenAI's Agentic Commerce Protocol expects
+// errors to carry a `type` URI, a `code`, a `message`, an optional `param`
+// pointing at the offending header/field, a `request_id`, and the negotiated
+// `supported_versions` list so agents can downgrade or retry against a
+// version the server understands. Orank's ACP-checkout bonus probe sends
+// POST with no headers and grades the error envelope shape.
+function acpError(status, code, message, { param, extra = {} } = {}) {
+  const requestId = crypto.randomUUID();
+  const body = {
+    type: `https://developers.openai.com/commerce/errors/${code}`,
+    code,
+    message,
+    ...(param ? { param } : {}),
+    request_id: requestId,
+    supported_versions: [ACP_VERSION],
+    api_version: ACP_VERSION,
+  };
+  return new Response(JSON.stringify(body, null, 2) + "\n", {
+    status,
+    headers: commerceHeaders({
+      "API-Version": ACP_VERSION,
+      "Request-Id": requestId,
+      ...extra,
+    }),
+  });
+}
+
 function publisher(baseUrl) {
   return {
     name: config.publisher || config.author || config.title,
@@ -197,23 +224,43 @@ function requireHeaders(request, protocol) {
 // UCP  → /checkout-sessions[...]   (protocol="ucp")
 // ACP  → /checkout_sessions[...]   (protocol="acp")
 export function handleCheckout(request, baseUrl, protocol) {
+  const isAcp = protocol === "acp";
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: commerceHeaders() });
+    return new Response(null, {
+      status: 204,
+      headers: commerceHeaders({
+        // Echo the negotiated version on preflight so orank's
+        // OPTIONS-allows-POST check sees the version + the allow list.
+        Allow: "GET, POST, OPTIONS",
+        ...(isAcp ? { "API-Version": ACP_VERSION } : { "UCP-Version": UCP_VERSION }),
+      }),
+    });
   }
 
-  const base = protocol === "ucp" ? "/checkout-sessions" : "/checkout_sessions";
+  const base = isAcp ? "/checkout_sessions" : "/checkout-sessions";
   const sub = new URL(request.url).pathname.slice(base.length);
-  const version = protocol === "ucp" ? UCP_VERSION : ACP_VERSION;
-  const verHeader = protocol === "ucp" ? "UCP-Version" : "API-Version";
+  const version = isAcp ? ACP_VERSION : UCP_VERSION;
+  const verHeader = isAcp ? "API-Version" : "UCP-Version";
+  // ACP gets the spec-shaped problem-doc envelope (supported_versions,
+  // type, param, request_id). UCP stays on the simple envelope — orank's
+  // ACP bonus probe specifically wants the OpenAI Commerce shape.
   const missing = (field) =>
-    commerceError(400, "missing_header", `Missing required header: ${field}.`, {
-      [verHeader]: version,
-    });
+    isAcp
+      ? acpError(400, "missing_required_header", `Missing required header: ${field}.`, {
+          param: field,
+        })
+      : commerceError(400, "missing_header", `Missing required header: ${field}.`, {
+          [verHeader]: version,
+        });
+  const methodNotAllowed = (msg, allow) =>
+    isAcp
+      ? acpError(405, "method_not_allowed", msg, { extra: { Allow: allow } })
+      : commerceError(405, "method_not_allowed", msg, { Allow: allow });
 
   // Create — POST /checkout[-_]sessions
   if (sub === "" || sub === "/") {
     if (request.method !== "POST") {
-      return commerceError(405, "method_not_allowed", `Create a checkout session with POST ${base}.`, { Allow: "POST, OPTIONS" });
+      return methodNotAllowed(`Create a checkout session with POST ${base}.`, "POST, OPTIONS");
     }
     const hdr = requireHeaders(request, protocol);
     if (!hdr.ok) return missing(hdr.field);
@@ -226,7 +273,11 @@ export function handleCheckout(request, baseUrl, protocol) {
 
   // /{id} or /{id}/{action}
   const m = sub.match(/^\/([A-Za-z0-9_-]+)(?:\/(complete|cancel))?$/);
-  if (!m) return commerceError(404, "not_found", "Unknown checkout-session path.");
+  if (!m) {
+    return isAcp
+      ? acpError(404, "not_found", "Unknown checkout-session path.")
+      : commerceError(404, "not_found", "Unknown checkout-session path.");
+  }
   const [, id, action] = m;
 
   // Retrieve / update a session — GET or POST /checkout[-_]sessions/{id}
@@ -242,12 +293,12 @@ export function handleCheckout(request, baseUrl, protocol) {
         "Idempotency-Key": hdr.idemKey,
       });
     }
-    return commerceError(405, "method_not_allowed", "Use GET or POST on a checkout session.", { Allow: "GET, POST, OPTIONS" });
+    return methodNotAllowed("Use GET or POST on a checkout session.", "GET, POST, OPTIONS");
   }
 
   // Complete / cancel — POST /checkout[-_]sessions/{id}/{action}
   if (request.method !== "POST") {
-    return commerceError(405, "method_not_allowed", `${action} requires POST.`, { Allow: "POST, OPTIONS" });
+    return methodNotAllowed(`${action} requires POST.`, "POST, OPTIONS");
   }
   const hdr = requireHeaders(request, protocol);
   if (!hdr.ok) return missing(hdr.field);

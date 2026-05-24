@@ -87,6 +87,31 @@ describe(".well-known/oauth-authorization-server (RFC 8414)", () => {
     expect(m.agent_auth.skills[0].name).toBe("use-agent-auth");
   });
 
+  it("publishes registration_templates with anonymous + user-email-app + service-account", () => {
+    expect(Array.isArray(m.agent_auth.registration_templates)).toBe(true);
+    const ids = m.agent_auth.registration_templates.map((t) => t.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "anonymous-public-client",
+        "user-email-app",
+        "service-account",
+      ])
+    );
+    expect(m.registration_endpoint_methods_supported).toEqual(
+      expect.arrayContaining(["GET", "POST"])
+    );
+    expect(m.registration_templates_uri).toBe(`${SITE}/oauth/register`);
+  });
+
+  it("user-email-app template marks user_email as required + identity_type=identity_assertion", () => {
+    const email = m.agent_auth.registration_templates.find(
+      (t) => t.id === "user-email-app",
+    );
+    expect(email.identity_type).toBe("identity_assertion");
+    expect(email.required_fields).toContain("user_email");
+    expect(email.request_body_template.user_email).toBe("{{user_email}}");
+  });
+
   it("agent_auth.steps walks Discover → Register → Claim → Use → Revoke", () => {
     expect(Array.isArray(m.agent_auth.steps)).toBe(true);
     expect(m.agent_auth.steps).toHaveLength(5);

@@ -129,6 +129,19 @@ describe("/auth.md (WorkOS auth.md spec)", () => {
     expect(md).toContain("/oauth/revoke");
     expect(md).toContain("/oauth/jwks.json");
   });
+
+  it("walks the GET-only registration-template chain (workos.com/auth-md/docs/apps)", () => {
+    expect(md).toContain("### GET-only discovery (with just an email)");
+    expect(md).toMatch(/workos\.com\/auth-md\/docs\/apps/);
+    // Each step in the GET-only chain must appear: auth.md, PRM, AS, templates.
+    expect(md).toContain("/.well-known/oauth-protected-resource");
+    expect(md).toContain("/.well-known/oauth-authorization-server");
+    expect(md).toContain("/oauth/register");
+    // user-email-app template referenced by name so an agent's regex search
+    // for the template name lands on the walkthrough.
+    expect(md).toContain("user-email-app");
+    expect(md).toMatch(/identity_assertion/);
+  });
 });
 
 describe("/.well-known/agent-card.json (A2A)", () => {

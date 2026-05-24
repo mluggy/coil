@@ -149,12 +149,30 @@ describe("ACP checkout — POST /checkout_sessions", () => {
     expect(resp.headers.get("Idempotency-Key")).toBe("idem-acp-1");
   });
 
-  it("400s without the API-Version header", async () => {
+  it("400s without the API-Version header — ACP-shaped envelope", async () => {
     const resp = await call("/checkout_sessions", {
       method: "POST",
       headers: { "Idempotency-Key": "idem-acp-2" },
     });
     expect(resp.status).toBe(400);
-    expect((JSON.parse(await resp.text())).error.message).toMatch(/API-Version/);
+    const body = JSON.parse(await resp.text());
+    // OpenAI Commerce problem-doc shape: type + code + message + param +
+    // request_id + supported_versions. Orank's ACP bonus probe grades this.
+    expect(body.type).toMatch(/^https:\/\/developers\.openai\.com\/commerce\/errors\//);
+    expect(body.code).toBe("missing_required_header");
+    expect(body.message).toMatch(/API-Version/);
+    expect(body.param).toBe("API-Version");
+    expect(body.request_id).toBeTruthy();
+    expect(body.supported_versions).toEqual(["2025-09-29"]);
+    expect(body.api_version).toBe("2025-09-29");
+    expect(resp.headers.get("API-Version")).toBe("2025-09-29");
+  });
+
+  it("OPTIONS preflight on /checkout_sessions allows POST and echoes API-Version", async () => {
+    const resp = await call("/checkout_sessions", { method: "OPTIONS" });
+    expect(resp.status).toBe(204);
+    expect((resp.headers.get("Allow") || "").toUpperCase()).toContain("POST");
+    expect((resp.headers.get("Access-Control-Allow-Methods") || "").toUpperCase()).toContain("POST");
+    expect(resp.headers.get("API-Version")).toBe("2025-09-29");
   });
 });

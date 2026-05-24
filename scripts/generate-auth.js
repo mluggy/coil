@@ -13,7 +13,17 @@
 import { writeFileSync } from "fs";
 import config from "./load-config.js";
 
-const SITE = "{{SITE_URL}}";
+// Bake the deployment's absolute origin into auth.md at build time when
+// podcast.yaml provides `site_url:`. This lets us drop the serve-time
+// {{SITE_URL}} rewrite for this file — required so the generated
+// use-agent-auth/SKILL.md (which inherits auth.md verbatim) ships
+// byte-identical bytes that orank's agent-auth-discovery deep check
+// can match against the served auth.md.
+//
+// When site_url is unset (coil's test/dev config), keep the existing
+// {{SITE_URL}} placeholder behavior — middleware rewrites it at serve
+// time. Tests run with the placeholder form.
+const SITE = config.site_url || "{{SITE_URL}}";
 const SCOPES = ["read:episodes", "read:transcripts", "search:episodes"];
 const SCOPE_LIST = SCOPES.join(" ");
 

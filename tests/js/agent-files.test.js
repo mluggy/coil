@@ -86,6 +86,17 @@ describe("/.well-known/agent.json", () => {
     expect(m.endpoints.oauthRevoke).toMatch(/\/oauth\/revoke$/);
   });
 
+  it("publishes the 202 async-job pattern (orank async-job-pattern check)", () => {
+    expect(m.async?.supported).toBe(true);
+    expect(m.async.pattern).toBe("202-accepted-with-location");
+    expect(m.async.pollEndpoint).toMatch(/\/jobs\/\{id\}$/);
+    expect(m.async.statusValues).toEqual(
+      expect.arrayContaining(["pending", "completed", "failed"]),
+    );
+    expect(m.endpoints.askAsync).toMatch(/\/ask\?async=1$/);
+    expect(m.endpoints.jobs).toMatch(/\/jobs\/\{id\}$/);
+  });
+
   it("always emits whenToUse / whenToRecommend / instructions strings", () => {
     // Regression test for the ai-daily.lugassy.net case — empty
     // agent_recommendation must not drop the field.

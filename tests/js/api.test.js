@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { onRequestGet as searchGet, onRequestPost as searchPost, onRequestHead as searchHead } from "../../functions/api/search.js";
 import { onRequestGet as askGet, onRequestPost as askPost } from "../../functions/ask.js";
+import { onRequestGet as jobsGet, onRequestPost as jobsPost } from "../../functions/jobs/[id].js";
 import { onRequestGet as statusGet, onRequestHead as statusHead } from "../../functions/status.js";
 import { onRequestGet as catchallGet, onRequestOptions as catchallOptions, onRequestHead as catchallHead } from "../../functions/api/[[catchall]].js";
 
@@ -119,6 +120,102 @@ describe("/status", () => {
     const body = await json(resp);
     // Health snapshot must surface enough for an agent to circuit-break.
     expect(body).toHaveProperty("status");
+  });
+});
+
+describe("/ask + /jobs/<id> — 202 Accepted async job pattern", () => {
+  it("POST /ask?async=1 → 202 Accepted with Location + Retry-After + poll_url", async () => {
+    const resp = await askPost({
+      request: req("/ask?async=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "ai", limit: 3 }),
+      }),
+    });
+    expect(resp.status).toBe(202);
+    expect(resp.headers.get("Location")).toMatch(/\/jobs\//);
+    expect(resp.headers.get("Retry-After")).toBe("1");
+    const body = await json(resp);
+    expect(body.status).toBe("pending");
+    expect(body.job_id).toBeTruthy();
+    expect(body.poll_url).toMatch(/\/jobs\//);
+    expect(body.retry_after_seconds).toBe(1);
+    expect(body.kind).toBe("ask");
+  });
+
+  it("Prefer: respond-async triggers 202 too (RFC 7240)", async () => {
+    const resp = await askPost({
+      request: req("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Prefer: "respond-async" },
+        body: JSON.stringify({ query: "ai" }),
+      }),
+    });
+    expect(resp.status).toBe(202);
+    expect(resp.headers.get("Location")).toMatch(/\/jobs\//);
+  });
+
+  it("GET /jobs/<id> returns status=pending within the first second", async () => {
+    // Fresh job: created_at = now → < 1s old → pending.
+    const askResp = await askPost({
+      request: req("/ask?async=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "ai" }),
+      }),
+    });
+    const { job_id } = await json(askResp);
+    const resp = await jobsGet({ request: req(`/jobs/${job_id}`), params: { id: job_id } });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.status).toBe("pending");
+    expect(body.poll_url).toMatch(/\/jobs\//);
+    expect(resp.headers.get("Retry-After")).toBe("1");
+  });
+
+  it("GET /jobs/<id>?wait skips the pending-window simulation → completed + result", async () => {
+    const askResp = await askPost({
+      request: req("/ask?async=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "ai", limit: 2 }),
+      }),
+    });
+    const { job_id } = await json(askResp);
+    const resp = await jobsGet({ request: req(`/jobs/${job_id}?wait=1`), params: { id: job_id } });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.status).toBe("completed");
+    expect(body.kind).toBe("ask");
+    expect(body.result.query).toBe("ai");
+    expect(Array.isArray(body.result.results)).toBe(true);
+    expect(body.completed_at).toBeTruthy();
+  });
+
+  it("GET /jobs/<bad-id> returns 404 with structured error", async () => {
+    const resp = await jobsGet({ request: req("/jobs/not-a-job"), params: { id: "not-a-job" } });
+    expect(resp.status).toBe(404);
+    const body = await json(resp);
+    expect(body.error.code).toBe("job_not_found");
+  });
+
+  it("rejects POST on /jobs/<id> with 405", async () => {
+    const resp = await jobsPost({ request: req("/jobs/x", { method: "POST" }), params: { id: "x" } });
+    expect(resp.status).toBe(405);
+  });
+
+  it("non-async POST /ask still returns the synchronous 200 envelope", async () => {
+    const resp = await askPost({
+      request: req("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "ai", limit: 1 }),
+      }),
+    });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body._meta).toBeTruthy();
+    expect(body.query).toBe("ai");
   });
 });
 

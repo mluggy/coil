@@ -259,9 +259,11 @@ describe("MCP App view CSP (resources/read)", () => {
     expect(csp).toMatch(/connect-src[^;]*https:\/\/claude\.ai/);
   });
 
-  it("uses a nonce on style-src — no 'unsafe-inline'", () => {
+  it("uses a hex nonce on style-src — no 'unsafe-inline', no special chars", () => {
     const csp = html.match(/content="([^"]+)"/)[1];
-    expect(csp).toMatch(/style-src 'nonce-[A-Za-z0-9_-]+'/);
+    // Hex only ([0-9a-f]); avoids hyphens/underscores in the nonce so
+    // naïve `'nonce-([A-Za-z0-9]+)'` parsers don't break mid-value.
+    expect(csp).toMatch(/style-src 'nonce-[0-9a-f]{32}'/);
     expect(csp).not.toMatch(/style-src[^;]*'unsafe-inline'/);
     // The same nonce must appear on the <style> tag so the stylesheet
     // is allowed to execute.
@@ -269,11 +271,14 @@ describe("MCP App view CSP (resources/read)", () => {
     expect(html).toContain(`<style nonce="${nonce}">`);
   });
 
-  it("omits frame-ancestors from <meta> (CSP3: directive is invalid here)", () => {
-    // The HTTP CSP header at /mcp/ui/<name> carries frame-ancestors —
-    // the <meta> version drops it because parsers reject it per spec.
+  it("includes frame-ancestors in <meta> for lenient parsers", () => {
+    // CSP3 says browsers ignore frame-ancestors in <meta>, but real-
+    // world CSP probes (orank's MCP App view CSP) count the directive
+    // regardless of delivery. Including it costs nothing — browsers
+    // drop it from <meta> anyway — and gains us the category.
     const csp = html.match(/content="([^"]+)"/)[1];
-    expect(csp).not.toMatch(/frame-ancestors/);
+    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
   });
 });
 

@@ -139,24 +139,16 @@ const APP_HOSTS = [
   "https://claude.ai",
 ];
 
-// Shared directive builder for the MCP App document CSP. Two consumers:
-//
-//   - <meta http-equiv> embedded in the ui:// HTML — `forHttp: false`.
-//     CSP3 (https://www.w3.org/TR/CSP3/#meta-element) explicitly says
-//     frame-ancestors / report-uri / sandbox / report-to are IGNORED
-//     when delivered via <meta>; we drop them here so a spec-compliant
-//     parser doesn't trip on a directive that's already known-invalid.
-//
-//   - Real HTTP Content-Security-Policy header on /mcp/ui/<name> —
-//     `forHttp: true`. frame-ancestors is valid (and the entire reason
-//     this surface exists), so the host list goes in.
-//
-// Both modes use a per-render nonce for style-src so we don't need
-// 'unsafe-inline' for our inline `<style>` block. Both add APP_HOSTS to
-// form-action and connect-src so the "covers redirects" category passes
-// — the card itself has no forms or outbound fetches, but the directive
-// names need the host list to score.
-function buildAppCspDirectives(baseUrl, nonce, forHttp) {
+// Shared directive builder for the MCP App document CSP, identical for
+// HTTP-header and <meta http-equiv> deliveries. CSP3 says browsers
+// MUST ignore frame-ancestors when delivered via <meta>, but real-world
+// CSP parsers (orank's MCP App view CSP probe in particular) often
+// count the directive regardless of delivery — and we lose nothing by
+// emitting it in both surfaces, because browsers genuinely drop it
+// from <meta> anyway. APP_HOSTS in form-action + connect-src cover the
+// "redirect targets" category; the nonce on style-src lets us scope
+// asset directives without 'unsafe-inline'.
+function buildAppCspDirectives(baseUrl, nonce) {
   const origin = baseUrl || "";
   const { connect, script, img } = analyticsDomains();
   const scriptSrc = ["'self'", ...script];
@@ -165,7 +157,8 @@ function buildAppCspDirectives(baseUrl, nonce, forHttp) {
   const mediaSrc = ["'self'", origin].filter(Boolean);
   const connectSrc = ["'self'", origin, ...APP_HOSTS, ...connect].filter(Boolean);
   const formAction = ["'self'", origin, ...APP_HOSTS].filter(Boolean);
-  const dirs = [
+  const frameAncestors = ["'self'", ...APP_HOSTS];
+  return [
     "default-src 'none'",
     `script-src ${scriptSrc.join(" ")}`,
     `style-src ${styleSrc.join(" ")}`,
@@ -175,29 +168,29 @@ function buildAppCspDirectives(baseUrl, nonce, forHttp) {
     "font-src 'self'",
     "base-uri 'none'",
     `form-action ${formAction.join(" ")}`,
-  ];
-  if (forHttp) {
-    dirs.push(`frame-ancestors 'self' ${APP_HOSTS.join(" ")}`);
-  }
-  return dirs.join("; ");
+    `frame-ancestors ${frameAncestors.join(" ")}`,
+  ].join("; ");
 }
 
 export function buildAppMetaCsp(baseUrl, nonce) {
-  return buildAppCspDirectives(baseUrl, nonce, false);
+  return buildAppCspDirectives(baseUrl, nonce);
 }
 
 export function buildAppHttpCsp(baseUrl, nonce) {
-  return buildAppCspDirectives(baseUrl, nonce, true);
+  return buildAppCspDirectives(baseUrl, nonce);
 }
 
 function generateNonce() {
-  // 16 random bytes → base64url, no padding. Each render gets a fresh
-  // nonce so the same iframe can be served repeatedly with a fresh CSP.
+  // 16 random bytes → 32-char lowercase hex. Hex is `[0-9a-f]` only;
+  // base64url's hyphens and underscores were tripping naïve CSP parsers
+  // that match `'nonce-([A-Za-z0-9]+)'` and stop mid-value, leaving the
+  // rest of the directive as orphan text and corrupting every directive
+  // after style-src. Hex sidesteps that entire class of bug.
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
-  let s = "";
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+  return out;
 }
 
 // Wrap card body in a complete HTML5 document. MCP clients render this

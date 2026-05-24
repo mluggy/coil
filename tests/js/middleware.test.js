@@ -494,6 +494,31 @@ describe("RFC 9598 rate-limit headers on every /api/* response", () => {
   });
 });
 
+describe("agent-mode envelope advertises 202 async pattern + /jobs endpoint", () => {
+  let body;
+  beforeAll(async () => {
+    const resp = await call("/?mode=agent");
+    body = JSON.parse(await resp.text());
+  });
+
+  it("includes async block (orank async-job-pattern check)", () => {
+    expect(body.async.supported).toBe(true);
+    expect(body.async.pattern).toBe("202-accepted-with-location");
+    expect(body.async.statusValues).toEqual(
+      expect.arrayContaining(["pending", "completed", "failed"]),
+    );
+    expect(body.async.headers.response).toEqual(
+      expect.arrayContaining(["Location", "Retry-After"]),
+    );
+    expect(body.async.pollEndpoint).toMatch(/\/jobs\/\{id\}$/);
+  });
+
+  it("endpoints map publishes askAsync + jobs", () => {
+    expect(body.endpoints.askAsync).toMatch(/\/ask\?async=1$/);
+    expect(body.endpoints.jobs).toMatch(/\/jobs\/\{id\}$/);
+  });
+});
+
 describe("legacy redirects", () => {
   it("/subscribe → 301 to /", async () => {
     const resp = await call("/subscribe");

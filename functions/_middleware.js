@@ -552,6 +552,22 @@ function buildAgentJson(episode, baseUrl) {
       eventTypes: ["start", "result", "complete"],
       rest: "Synchronous request / response on read endpoints — no streaming on /api/search or /episodes.json.",
     },
+    async: {
+      // 202 Accepted + polling pattern. POST /ask?async=1 (or send
+      // `Prefer: respond-async`) → 202 with Location: /jobs/<id> +
+      // Retry-After + JSON body with poll_url. GET /jobs/<id> →
+      // 200 with { status: pending|completed|failed, ... }.
+      supported: true,
+      pattern: "202-accepted-with-location",
+      entryPoints: [`${baseUrl}/ask?async=1`],
+      pollEndpoint: `${baseUrl}/jobs/{id}`,
+      headers: {
+        request: ["Prefer: respond-async"],
+        response: ["Location", "Retry-After"],
+      },
+      statusValues: ["pending", "completed", "failed"],
+      docs: `${baseUrl}/api/llms.txt#async`,
+    },
     idempotency: {
       reads: "All public endpoints are read-only and idempotent by definition.",
       writes: "No write endpoints today — donate / oauth flows are bounded by their own protocols.",
@@ -607,6 +623,8 @@ function buildAgentJson(episode, baseUrl) {
       search: `${baseUrl}/api/search?q={query}`,
       ask: `${baseUrl}/ask`,
       askGet: `${baseUrl}/ask?q={query}`,
+      askAsync: `${baseUrl}/ask?async=1`,
+      jobs: `${baseUrl}/jobs/{id}`,
       status: `${baseUrl}/status`,
       mcp: `${baseUrl}/mcp`,
       mcpDiscovery: [
@@ -1534,7 +1552,8 @@ export async function onRequest({ request, next, env }) {
     path === "/status" ||
     path === "/donate" ||
     path.startsWith("/api/") ||
-    path.startsWith("/oauth/")
+    path.startsWith("/oauth/") ||
+    path.startsWith("/jobs/")
   ) {
     const resp = await next();
     // Backfill rate-limit headers if the downstream handler didn't set

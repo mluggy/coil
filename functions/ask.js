@@ -40,6 +40,52 @@ function wantsSse(request) {
   return /\bstreaming\s*=\s*true\b/i.test(prefer);
 }
 
+// Async-mode signal — either ?async=1 / ?async=true on the URL or
+// RFC 7240 `Prefer: respond-async`. orank's async-job-pattern probe
+// looks for a 202 Accepted with Location + Retry-After + poll URL.
+function wantsAsync(request) {
+  const url = new URL(request.url);
+  const qs = (url.searchParams.get("async") || "").toLowerCase();
+  if (qs === "1" || qs === "true" || qs === "yes") return true;
+  const prefer = (request.headers.get("prefer") || "").toLowerCase();
+  return /\brespond-async\b/.test(prefer);
+}
+
+// Encode a job spec into a base64url id. Stateless — the id IS the
+// job, so GET /jobs/<id> can recompute the result without server state.
+function encodeJobId(spec) {
+  const json = JSON.stringify(spec);
+  const bytes = new TextEncoder().encode(json);
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function buildAsyncAcceptedResponse(spec, baseUrl) {
+  const id = encodeJobId(spec);
+  const pollUrl = `${baseUrl}/jobs/${id}`;
+  const body = {
+    job_id: id,
+    status: "pending",
+    kind: spec.kind,
+    poll_url: pollUrl,
+    retry_after_seconds: 1,
+    created_at: spec.created_at,
+    docs_url: `${baseUrl}/api/llms.txt#async`,
+  };
+  return new Response(JSON.stringify(body), {
+    status: 202,
+    headers: apiHeaders({
+      // RFC 7231 — Location identifies the resource representing the
+      // started operation; clients GET it to follow up.
+      Location: pollUrl,
+      "Retry-After": "1",
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json; charset=utf-8",
+    }),
+  });
+}
+
 async function parseQuery(request) {
   const url = new URL(request.url);
   // GET also supported via ?q=, for cheap probing.
@@ -124,6 +170,18 @@ async function handleAsk(request) {
 
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
+
+  // Async mode — return 202 Accepted with a poll URL, deferring the
+  // actual search to GET /jobs/<id>. Stateless: the job id encodes
+  // the query, so the polling endpoint reproduces the result without
+  // any server-side job state.
+  if (wantsAsync(request)) {
+    return buildAsyncAcceptedResponse(
+      { kind: "ask", q: query, limit, created_at: new Date().toISOString() },
+      baseUrl,
+    );
+  }
+
   const t0 = Date.now();
   const { results } = searchEpisodes(query, { limit, baseUrl });
   const took_ms = Date.now() - t0;

@@ -83,6 +83,30 @@ describe("/.well-known/openapi.json", () => {
     expect(json).toMatch(/"\$ref":\s*"#\/components\/schemas\/Error"/);
   });
 
+  it("every 4xx/5xx response across every operation references the shared Error schema (orank typed-error-model consistency)", () => {
+    // The donate 402 used to ship a payment-only inline schema with no
+    // Error ref, breaking 100% consistency. Re-audit on every build so
+    // a future addition can't silently regress us back to 1/3.
+    const errs = [];
+    for (const [path, methods] of Object.entries(spec.paths)) {
+      for (const [method, op] of Object.entries(methods)) {
+        if (!op || typeof op !== "object" || !op.responses) continue;
+        for (const [code, resp] of Object.entries(op.responses)) {
+          if (!/^[45]/.test(code)) continue;
+          if (resp.$ref?.startsWith("#/components/responses/")) continue; // shared, already consistent
+          const content = resp.content || {};
+          const refsError = (s) =>
+            JSON.stringify(s || {}).includes('"$ref":"#/components/schemas/Error"');
+          const jsonRefsError = refsError(content["application/json"]?.schema);
+          const problemRefsError = refsError(content["application/problem+json"]?.schema);
+          if (!jsonRefsError) errs.push(`${method.toUpperCase()} ${path} ${code}: application/json doesn't include $ref to Error`);
+          if (!problemRefsError) errs.push(`${method.toUpperCase()} ${path} ${code}: application/problem+json missing or doesn't $ref Error`);
+        }
+      }
+    }
+    expect(errs, errs.join("\n")).toEqual([]);
+  });
+
   it("every named error response references the shared Error schema in BOTH application/json AND application/problem+json", () => {
     // Typed-error-model probe wants consistent shape across every 4xx/5xx
     // response and RFC 7807 media-type adoption.

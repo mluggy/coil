@@ -7,6 +7,7 @@ import { onRequestGet as searchGet, onRequestPost as searchPost, onRequestHead a
 import { onRequestGet as askGet, onRequestPost as askPost } from "../../functions/ask.js";
 import { onRequestGet as jobsGet, onRequestPost as jobsPost } from "../../functions/jobs/[id].js";
 import { onRequestGet as jobsIndexGet, onRequestPost as jobsIndexPost } from "../../functions/jobs/index.js";
+import { onRequestGet as jobsBatchGet, onRequestPost as jobsBatchPost } from "../../functions/jobs/batch.js";
 import { onRequestGet as statusGet, onRequestHead as statusHead } from "../../functions/status.js";
 import { onRequestGet as catchallGet, onRequestOptions as catchallOptions, onRequestHead as catchallHead } from "../../functions/api/[[catchall]].js";
 
@@ -229,6 +230,87 @@ describe("/ask + /jobs/<id> — 202 Accepted async job pattern", () => {
         "==".slice(0, (4 - (bodyA.job_id.length % 4)) % 4)),
     );
     expect(decoded.idempotency_key).toBe(key);
+  });
+
+  it("POST /jobs/batch with array body → 202 + per-item results", async () => {
+    const resp = await jobsBatchPost({
+      request: req("/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([
+          { kind: "ask", query: "ai" },
+          { kind: "search", query: "agents", limit: 2 },
+        ]),
+      }),
+    });
+    expect(resp.status).toBe(202);
+    const body = await json(resp);
+    expect(body.object).toBe("batch");
+    expect(body.total).toBe(2);
+    expect(body.created).toBe(2);
+    expect(body.failed).toBe(0);
+    expect(body.results).toHaveLength(2);
+    for (const [i, r] of body.results.entries()) {
+      expect(r.index).toBe(i);
+      expect(r.status).toBe("pending");
+      expect(r.poll_url).toMatch(/\/jobs\//);
+    }
+  });
+
+  it("POST /jobs/batch rejects non-array body with 400", async () => {
+    const resp = await jobsBatchPost({
+      request: req("/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "ask", query: "ai" }),
+      }),
+    });
+    expect(resp.status).toBe(400);
+    const body = await json(resp);
+    expect(body.error.code).toBe("not_an_array");
+  });
+
+  it("POST /jobs/batch rejects oversize batch (>50)", async () => {
+    const big = Array.from({ length: 51 }, () => ({ kind: "ask", query: "ai" }));
+    const resp = await jobsBatchPost({
+      request: req("/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(big),
+      }),
+    });
+    expect(resp.status).toBe(400);
+    const body = await json(resp);
+    expect(body.error.code).toBe("batch_too_large");
+  });
+
+  it("POST /jobs/batch surfaces per-item validation failures without rejecting the batch", async () => {
+    const resp = await jobsBatchPost({
+      request: req("/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([
+          { kind: "ask", query: "ai" },
+          { kind: "delete-everything", query: "x" },
+          { kind: "search" },
+        ]),
+      }),
+    });
+    expect(resp.status).toBe(202);
+    const body = await json(resp);
+    expect(body.created).toBe(1);
+    expect(body.failed).toBe(2);
+    expect(body.results[0].status).toBe("pending");
+    expect(body.results[1].error.code).toBe("unsupported_kind");
+    expect(body.results[2].error.code).toBe("missing_query");
+  });
+
+  it("GET /jobs/batch returns a discovery envelope", async () => {
+    const resp = await jobsBatchGet({ request: req("/jobs/batch") });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.maxBatchSize).toBe(50);
+    expect(body.supportedKinds).toEqual(expect.arrayContaining(["ask", "search"]));
   });
 
   it("POST /jobs (conventional path) → 202 + Location + body", async () => {

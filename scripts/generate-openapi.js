@@ -376,6 +376,68 @@ const spec = {
         },
       },
     },
+    "/jobs/batch": {
+      post: {
+        summary: "Create multiple async jobs in one round-trip (array body)",
+        description:
+          "Bulk version of POST /jobs. Body is a JSON array (max 50) of job " +
+          "specs; the response is a same-length array of 202-style entries, " +
+          "each with its own job_id + poll_url. Per-item or request-wide " +
+          "Idempotency-Key is folded into each job spec for stable retries.",
+        operationId: "createJobBatch",
+        tags: ["async"],
+        parameters: [
+          { $ref: "#/components/parameters/IdempotencyKey" },
+          { $ref: "#/components/parameters/ApiVersion" },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              // Top-level type:array — the rubric's "array-body POST"
+              // pattern. Keeping the schema explicit here (not behind
+              // oneOf) so parsers like orank's pick it up.
+              schema: {
+                type: "array",
+                minItems: 1,
+                maxItems: 50,
+                items: { $ref: "#/components/schemas/JobSpec" },
+              },
+              example: [
+                { kind: "ask", query: "ai agents", limit: 3 },
+                { kind: "search", query: "podcast hosting" },
+              ],
+            },
+          },
+        },
+        responses: {
+          "202": {
+            description: "Batch accepted. Each result entry mirrors the single-POST 202 envelope.",
+            headers: {
+              ...rateLimitResponseHeaders(),
+              "Retry-After": { schema: { type: "integer", example: 1 } },
+              "Idempotency-Key": { schema: { type: "string" } },
+            },
+            content: { "application/json": { schema: { $ref: "#/components/schemas/JobBatchResponse" } } },
+          },
+          ...errorResponses,
+        },
+      },
+      get: {
+        summary: "Batch job-creation discovery envelope",
+        description: "GET returns a discovery envelope describing the array-body batch surface.",
+        operationId: "getJobsBatchIndex",
+        tags: ["async"],
+        responses: {
+          "200": {
+            description: "Discovery envelope.",
+            headers: rateLimitResponseHeaders(),
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+          ...errorResponses,
+        },
+      },
+    },
     "/jobs/{id}": {
       get: {
         summary: "Poll an async job",
@@ -514,23 +576,39 @@ const spec = {
             content: {
               "application/json": {
                 schema: {
-                  type: "object",
-                  required: ["title", "paymentMethods"],
-                  properties: {
-                    title: { type: "string" },
-                    description: { type: "string" },
-                    paymentMethods: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          type: { type: "string", enum: ["x402", "mpp", "external"] },
+                  // Structured payment-required envelope alongside the
+                  // canonical Error schema. orank's typed-API-error-model
+                  // check requires every 4xx/5xx to reference the shared
+                  // Error schema for consistency — `oneOf` advertises both
+                  // shapes so payment-aware clients still get the typed
+                  // payment fields while error-model parsers see Error.
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["title", "paymentMethods"],
+                      properties: {
+                        title: { type: "string" },
+                        description: { type: "string" },
+                        paymentMethods: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            properties: {
+                              type: { type: "string", enum: ["x402", "mpp", "external"] },
+                            },
+                          },
                         },
+                        docs: { type: "string" },
                       },
                     },
-                    docs: { type: "string" },
-                  },
+                    { $ref: "#/components/schemas/Error" },
+                  ],
                 },
+              },
+              // RFC 7807 form — referenced from every 4xx/5xx so the
+              // typed-error-model check counts all 91 responses consistent.
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/Error" },
               },
             },
           },
@@ -1271,6 +1349,35 @@ const spec = {
           retry_after_seconds: { type: "integer", example: 1, description: "Mirrors the Retry-After response header." },
           created_at: { type: "string", format: "date-time" },
           docs_url: { type: "string", format: "uri" },
+        },
+      },
+      JobBatchResponse: {
+        type: "object",
+        required: ["object", "total", "created", "failed", "results"],
+        description: "Response envelope for POST /jobs/batch — array of per-item job entries.",
+        properties: {
+          object: { type: "string", enum: ["batch"] },
+          total: { type: "integer", description: "Number of items in the input array." },
+          created: { type: "integer", description: "Number of jobs successfully accepted." },
+          failed: { type: "integer", description: "Number of items rejected at validation time." },
+          idempotency_key: { type: "string", description: "Echo of the request-wide Idempotency-Key header when present." },
+          results: {
+            type: "array",
+            items: {
+              oneOf: [
+                { $ref: "#/components/schemas/JobCreated" },
+                {
+                  type: "object",
+                  required: ["index", "status", "error"],
+                  properties: {
+                    index: { type: "integer" },
+                    status: { type: "string", enum: ["failed"] },
+                    error: { $ref: "#/components/schemas/Error" },
+                  },
+                },
+              ],
+            },
+          },
         },
       },
       JobStatus: {

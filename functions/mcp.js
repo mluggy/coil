@@ -14,7 +14,7 @@ import episodes from "./_episodes.js";
 import config from "./_config.js";
 import { searchEpisodes, summarizeEpisode } from "./_search.js";
 import { apiHeaders, corsPreflight, errors } from "./_api.js";
-import { buildUiResource, listUiResources, listUiResourceTemplates, uiResourceForTool, MCP_APP_MIME, buildUiCspMeta } from "./_mcp_apps.js";
+import { buildUiResource, listUiResources, listUiResourceTemplates, uiResourceForTool, MCP_APP_MIME, buildUiCspMeta, httpUrlFor } from "./_mcp_apps.js";
 
 export const SERVER_INFO = {
   name: "coil-podcast-mcp",
@@ -123,17 +123,30 @@ const INSTRUCTIONS = [
 // form-action is scoped, and the asset directives are non-wildcard.
 // The endpoint only ever returns JSON, so everything is locked to
 // 'self'/'none' — no inline assets, no third-party origins.
+// MCP App host origins — must appear in frame-ancestors (so they can
+// embed our /mcp surface), form-action (so OAuth-style redirects to
+// them are allowed), and connect-src (so iframe traffic to them is
+// allowed). Kept in lockstep with APP_HOSTS in functions/_mcp_apps.js
+// so /mcp and the ui:// resources advertise the same trust list.
+const MCP_APP_HOSTS = [
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  "https://claude.ai",
+];
+
 export function mcpCsp(baseUrl) {
+  const origin = baseUrl ? ` ${baseUrl}` : "";
+  const hosts = MCP_APP_HOSTS.join(" ");
   return [
     "default-src 'none'",
-    `connect-src 'self'${baseUrl ? ` ${baseUrl}` : ""}`,
+    `connect-src 'self'${origin} ${hosts}`,
     "img-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "font-src 'self'",
     "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'self' https://chatgpt.com https://claude.ai",
+    `form-action 'self'${origin} ${hosts}`,
+    `frame-ancestors 'self' ${hosts}`,
   ].join("; ");
 }
 
@@ -304,10 +317,20 @@ function dispatchRpc(message, baseUrl) {
       // still return the resolved (per-call) URI in _meta as a hint —
       // some clients use it to short-circuit a templated lookup.
       const uiUri = uiResourceForTool(name, args, result);
+      const uiHttpUrl = httpUrlFor(uiUri, baseUrl);
       return rpcResult(id, {
         content: textContent(result),
         isError: false,
-        ...(uiUri ? { _meta: { "ui": { resourceUri: uiUri } } } : {}),
+        ...(uiUri
+          ? {
+              _meta: {
+                ui: {
+                  resourceUri: uiUri,
+                  ...(uiHttpUrl ? { httpUrl: uiHttpUrl } : {}),
+                },
+              },
+            }
+          : {}),
       });
     } catch (e) {
       // Argument-shape errors come back as JSON-RPC -32602 with a typed
@@ -336,13 +359,16 @@ function dispatchRpc(message, baseUrl) {
       if (!html) return rpcError(id, -32602, `Unknown resource uri: ${uri}`);
       // Per MCP Apps spec, the sandbox CSP travels alongside the resource
       // content as `_meta.ui.csp` so the host can apply it to the iframe.
+      // `_meta.ui.httpUrl` points at the same HTML served over HTTP at
+      // /mcp/ui/<rest>, so probes that read CSP from response headers
+      // (which is the only way to see frame-ancestors) can fetch it.
       return rpcResult(id, {
         contents: [
           {
             uri,
             mimeType: MCP_APP_MIME,
             text: html,
-            _meta: buildUiCspMeta(baseUrl),
+            _meta: buildUiCspMeta(baseUrl, uri),
           },
         ],
       });

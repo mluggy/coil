@@ -251,10 +251,50 @@ describe("MCP App view CSP (resources/read)", () => {
     expect(csp).toMatch(/img-src[^;]*https:\/\/example\.test/);
   });
 
-  it("allows framing only by ChatGPT and Claude", () => {
+  it("scopes form-action + connect-src to ChatGPT and Claude (orank 'covers redirects')", () => {
     const csp = html.match(/content="([^"]+)"/)[1];
-    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/chatgpt\.com/);
-    expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
+    expect(csp).toMatch(/form-action[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/form-action[^;]*https:\/\/claude\.ai/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/claude\.ai/);
+  });
+
+  it("uses a nonce on style-src — no 'unsafe-inline'", () => {
+    const csp = html.match(/content="([^"]+)"/)[1];
+    expect(csp).toMatch(/style-src 'nonce-[A-Za-z0-9_-]+'/);
+    expect(csp).not.toMatch(/style-src[^;]*'unsafe-inline'/);
+    // The same nonce must appear on the <style> tag so the stylesheet
+    // is allowed to execute.
+    const nonce = csp.match(/style-src 'nonce-([^']+)'/)[1];
+    expect(html).toContain(`<style nonce="${nonce}">`);
+  });
+
+  it("omits frame-ancestors from <meta> (CSP3: directive is invalid here)", () => {
+    // The HTTP CSP header at /mcp/ui/<name> carries frame-ancestors —
+    // the <meta> version drops it because parsers reject it per spec.
+    const csp = html.match(/content="([^"]+)"/)[1];
+    expect(csp).not.toMatch(/frame-ancestors/);
+  });
+});
+
+describe("MCP Apps — _meta.ui.httpUrl back-pointer (orank MCP App view CSP)", () => {
+  it("resources/list emits _meta.ui.httpUrl per resource", async () => {
+    const r = await rpcJson({ jsonrpc: "2.0", id: 40, method: "resources/list" });
+    for (const res of r.result.resources) {
+      expect(res._meta?.ui?.httpUrl).toMatch(/\/mcp\/ui\//);
+      expect(res._meta.ui.httpUrl.endsWith(res.uri.replace(/^ui:\/\//, ""))).toBe(true);
+    }
+  });
+
+  it("resources/read attaches httpUrl pointing at the same content over HTTP", async () => {
+    const r = await rpcJson({
+      jsonrpc: "2.0",
+      id: 41,
+      method: "resources/read",
+      params: { uri: "ui://latest_episode" },
+    });
+    const item = r.result.contents[0];
+    expect(item._meta.ui.httpUrl).toBe(`${BASE}/mcp/ui/latest_episode`);
   });
 });
 
@@ -265,9 +305,14 @@ describe("MCP endpoint CSP header (orank mcp-view-csp)", () => {
     expect(csp).toBeTruthy();
     // The four directive categories orank's mcp-view-csp check scores.
     expect(csp).toMatch(/connect-src[^;]*'self'/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/claude\.ai/);
     expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/chatgpt\.com/);
     expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
-    expect(csp).toMatch(/form-action 'none'/);
+    // form-action must list the redirect targets (chatgpt/claude), not
+    // 'none' — orank's "covers redirects" category fails otherwise.
+    expect(csp).toMatch(/form-action[^;]*https:\/\/chatgpt\.com/);
+    expect(csp).toMatch(/form-action[^;]*https:\/\/claude\.ai/);
     expect(csp).toMatch(/img-src 'self'/);
     expect(csp).toMatch(/script-src 'self'/);
     // No permissive bare wildcard.

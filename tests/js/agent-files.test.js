@@ -197,6 +197,40 @@ describe("/.well-known/agent-skills/index.json (agentskills.io v0.2.0)", () => {
     expect(skill.whenToUse).toMatch(/bearer|auth/i);
   });
 
+  it("use-agent-auth SKILL.md mirrors /auth.md (same sections, anchors, templates)", () => {
+    const skillMd = read("public/.well-known/agent-skills/use-agent-auth/SKILL.md");
+    const authMd = read("public/auth.md");
+    // Same section structure (orank's agent-auth-discovery probe content-
+    // compares the SKILL.md against auth.md and fails when they diverge).
+    for (const heading of [
+      "## Discover",
+      "### GET-only discovery (with just an email)",
+      "## Pick a method",
+      "## Register",
+      "## Claim",
+      "## Use the credential",
+      "## Errors",
+      "## Revocation",
+    ]) {
+      expect(skillMd).toContain(heading);
+      expect(authMd).toContain(heading);
+    }
+    // Same WorkOS spec anchor keywords.
+    for (const kw of ["agent_auth", "register_uri", "identity_assertion", "WWW-Authenticate"]) {
+      expect(skillMd).toContain(kw);
+      expect(authMd).toContain(kw);
+    }
+    expect(skillMd).toMatch(/id-?jag/i);
+    expect(authMd).toMatch(/id-?jag/i);
+    // Same registration template ids.
+    for (const id of ["anonymous-public-client", "user-email-app", "service-account"]) {
+      expect(skillMd).toContain(id);
+      expect(authMd).toContain(id);
+    }
+    // Back-pointer to the prose walkthrough.
+    expect(skillMd).toContain("/auth.md");
+  });
+
   it("digests match the actual SKILL.md byte content", () => {
     for (const s of idx.skills) {
       const path = `public/.well-known/agent-skills/${s.name}/SKILL.md`;
@@ -221,10 +255,11 @@ describe("Per-skill SKILL.md frontmatter", () => {
       expect(md).toMatch(/^description: /m);
       expect(md).toMatch(/^when_to_use: /m);
       expect(md).toMatch(/## When to use/);
-      // Body must include either a "How to use" section or step-by-step
-      // headers ("Step 1 — …", "Step 2 — …"). The use-agent-auth skill
-      // uses the latter shape because the OAuth flow is sequential.
-      expect(md).toMatch(/## How to use|## Step \d+/);
+      // Body must include actionable guidance — either a "How to use"
+      // section, sequential "Step 1 — …" headers, or the auth.md-style
+      // Discover/Register/Claim sequence the use-agent-auth skill uses
+      // to stay content-matched with /auth.md.
+      expect(md).toMatch(/## How to use|## Step \d+|## (Discover|Register|Claim)/);
     }
   });
 });

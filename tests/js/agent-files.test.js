@@ -208,38 +208,16 @@ describe("/.well-known/agent-skills/index.json (agentskills.io v0.2.0)", () => {
     expect(skill.whenToUse).toMatch(/bearer|auth/i);
   });
 
-  it("use-agent-auth SKILL.md mirrors /auth.md (same sections, anchors, templates)", () => {
+  it("use-agent-auth SKILL.md body is byte-identical to /auth.md (orank content-compare)", () => {
     const skillMd = read("public/.well-known/agent-skills/use-agent-auth/SKILL.md");
-    const authMd = read("public/auth.md");
-    // Same section structure (orank's agent-auth-discovery probe content-
-    // compares the SKILL.md against auth.md and fails when they diverge).
-    for (const heading of [
-      "## Discover",
-      "### GET-only discovery (with just an email)",
-      "## Pick a method",
-      "## Register",
-      "## Claim",
-      "## Use the credential",
-      "## Errors",
-      "## Revocation",
-    ]) {
-      expect(skillMd).toContain(heading);
-      expect(authMd).toContain(heading);
-    }
-    // Same WorkOS spec anchor keywords.
-    for (const kw of ["agent_auth", "register_uri", "identity_assertion", "WWW-Authenticate"]) {
-      expect(skillMd).toContain(kw);
-      expect(authMd).toContain(kw);
-    }
-    expect(skillMd).toMatch(/id-?jag/i);
-    expect(authMd).toMatch(/id-?jag/i);
-    // Same registration template ids.
-    for (const id of ["anonymous-public-client", "user-email-app", "service-account"]) {
-      expect(skillMd).toContain(id);
-      expect(authMd).toContain(id);
-    }
-    // Back-pointer to the prose walkthrough.
-    expect(skillMd).toContain("/auth.md");
+    const authMd = read("public/auth.md").trim();
+    // The SKILL.md has our YAML frontmatter prepended; strip it and
+    // compare what's left to auth.md. A second `---` closes the
+    // frontmatter; everything after the next blank line is the body.
+    const m = skillMd.match(/^---\n[\s\S]*?\n---\n+([\s\S]*)$/);
+    expect(m, "SKILL.md missing YAML frontmatter").toBeTruthy();
+    const skillBody = m[1].trim();
+    expect(skillBody).toBe(authMd);
   });
 
   it("digests match the actual SKILL.md byte content", () => {

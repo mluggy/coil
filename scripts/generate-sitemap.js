@@ -121,7 +121,6 @@ const robots = [
   "# Default",
   "User-agent: *",
   `Content-Signal: search=yes, ai-input=yes, ai-train=${trainSignal}`,
-  "Crawl-delay: 10",
   "Allow: /",
   "",
 ].join("\n");

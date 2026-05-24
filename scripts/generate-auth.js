@@ -31,6 +31,20 @@ doc.push(
 );
 doc.push("");
 
+// ─── When to use ──────────────────────────────────────────────────────────
+doc.push("## When to use");
+doc.push("");
+doc.push(
+  `When to use this walkthrough: an agent needs an explicit bearer token ` +
+  `(audit logging, per-token quotas, or a strict MCP client that requires ` +
+  `OAuth), or needs to surface an \`identity_assertion\` bound to a user ` +
+  `(id-jag style). When **not** to use: anonymous access is acceptable for ` +
+  `every read endpoint on ${config.title}; skip this entire walkthrough if ` +
+  `you don't need a bearer token. The OAuth surface is here for clients ` +
+  `that require it, not as a gating layer.`
+);
+doc.push("");
+
 // ─── Discover ─────────────────────────────────────────────────────────────
 doc.push("## Discover");
 doc.push("");

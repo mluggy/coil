@@ -265,11 +265,12 @@ describe("robots.txt", () => {
     );
   });
 
-  it("emits a generic User-agent: * with Content-Signal + Crawl-delay", () => {
+  it("emits a generic User-agent: * with Content-Signal (no Crawl-delay)", () => {
     const train = config.ai_training ? "yes" : "no";
     expect(txt).toMatch(
-      new RegExp(`User-agent: \\*\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}\\nCrawl-delay: \\d+\\nAllow: /`),
+      new RegExp(`User-agent: \\*\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}\\nAllow: /`),
     );
+    expect(txt).not.toMatch(/Crawl-delay/i);
   });
 
   it("is concise — no more than 60 lines (forter-style grouping)", () => {

@@ -520,5 +520,13 @@ const rootSkillMd = [
   rootSkillBody,
 ].join("\n");
 
+// Write SKILL.md to BOTH locations:
+//   - ./public/SKILL.md   → bundled into dist/, served at /SKILL.md
+//     over HTTP for agents that fetch by URL (gitignored build artifact)
+//   - ./SKILL.md          → repo-root manifest, tracked in git, what
+//     `npx skills add <git-repo>` finds after cloning the repo
+// Same byte-identical content in both. After podcast.yaml changes,
+// re-run `npm run build` and commit the updated root SKILL.md.
 writeFileSync("public/SKILL.md", rootSkillMd);
-console.log("Generated public/SKILL.md (skills.sh root manifest)");
+writeFileSync("SKILL.md", rootSkillMd);
+console.log("Generated SKILL.md (repo root + public/SKILL.md)");

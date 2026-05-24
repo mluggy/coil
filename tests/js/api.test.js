@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import { onRequestGet as searchGet, onRequestPost as searchPost, onRequestHead as searchHead } from "../../functions/api/search.js";
 import { onRequestGet as askGet, onRequestPost as askPost } from "../../functions/ask.js";
 import { onRequestGet as jobsGet, onRequestPost as jobsPost } from "../../functions/jobs/[id].js";
+import { onRequestGet as jobsIndexGet, onRequestPost as jobsIndexPost } from "../../functions/jobs/index.js";
 import { onRequestGet as statusGet, onRequestHead as statusHead } from "../../functions/status.js";
 import { onRequestGet as catchallGet, onRequestOptions as catchallOptions, onRequestHead as catchallHead } from "../../functions/api/[[catchall]].js";
 
@@ -202,6 +203,66 @@ describe("/ask + /jobs/<id> — 202 Accepted async job pattern", () => {
   it("rejects POST on /jobs/<id> with 405", async () => {
     const resp = await jobsPost({ request: req("/jobs/x", { method: "POST" }), params: { id: "x" } });
     expect(resp.status).toBe(405);
+  });
+
+  it("POST /jobs (conventional path) → 202 + Location + body", async () => {
+    const resp = await jobsIndexPost({
+      request: req("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "ask", query: "ai", limit: 3 }),
+      }),
+    });
+    expect(resp.status).toBe(202);
+    expect(resp.headers.get("Location")).toMatch(/\/jobs\//);
+    expect(resp.headers.get("Retry-After")).toBe("1");
+    const body = await json(resp);
+    expect(body.status).toBe("pending");
+    expect(body.kind).toBe("ask");
+    expect(body.poll_url).toMatch(/\/jobs\//);
+  });
+
+  it("POST /jobs with Prefer: respond-async also works (RFC 7240)", async () => {
+    const resp = await jobsIndexPost({
+      request: req("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Prefer: "respond-async" },
+        body: JSON.stringify({ kind: "search", query: "ai" }),
+      }),
+    });
+    expect(resp.status).toBe(202);
+  });
+
+  it("POST /jobs rejects unknown kind with structured 400", async () => {
+    const resp = await jobsIndexPost({
+      request: req("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "delete-all-data", query: "x" }),
+      }),
+    });
+    expect(resp.status).toBe(400);
+    const body = await json(resp);
+    expect(body.error.code).toBe("unsupported_kind");
+  });
+
+  it("GET /jobs returns a discovery envelope with the 202 pattern", async () => {
+    const resp = await jobsIndexGet({ request: req("/jobs") });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.pattern).toBe("202-accepted-with-location");
+    expect(body.supportedKinds).toEqual(expect.arrayContaining(["ask", "search"]));
+    expect(body.poll).toMatch(/\/jobs\/\{id\}$/);
+  });
+
+  it("GET /api/search?async=1 → 202 + Location + Retry-After", async () => {
+    const resp = await searchGet({ request: req("/api/search?q=ai&async=1") });
+    expect(resp.status).toBe(202);
+    expect(resp.headers.get("Location")).toMatch(/\/jobs\//);
+    expect(resp.headers.get("Retry-After")).toBe("1");
+    const body = await json(resp);
+    expect(body.kind).toBe("search");
+    expect(body.status).toBe("pending");
   });
 
   it("non-async POST /ask still returns the synchronous 200 envelope", async () => {

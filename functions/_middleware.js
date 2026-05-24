@@ -553,13 +553,18 @@ function buildAgentJson(episode, baseUrl) {
       rest: "Synchronous request / response on read endpoints — no streaming on /api/search or /episodes.json.",
     },
     async: {
-      // 202 Accepted + polling pattern. POST /ask?async=1 (or send
-      // `Prefer: respond-async`) → 202 with Location: /jobs/<id> +
-      // Retry-After + JSON body with poll_url. GET /jobs/<id> →
-      // 200 with { status: pending|completed|failed, ... }.
+      // 202 Accepted + polling pattern. Multiple entry points so a
+      // probe that hits any of them sees the pattern: POST /jobs
+      // (conventional path), POST /ask?async=1, POST /api/search?async=1,
+      // or set `Prefer: respond-async` on any of the above.
       supported: true,
       pattern: "202-accepted-with-location",
-      entryPoints: [`${baseUrl}/ask?async=1`],
+      entryPoints: [
+        `${baseUrl}/jobs`,
+        `${baseUrl}/ask?async=1`,
+        `${baseUrl}/api/search?q={query}&async=1`,
+      ],
+      jobsCreate: `${baseUrl}/jobs`,
       pollEndpoint: `${baseUrl}/jobs/{id}`,
       headers: {
         request: ["Prefer: respond-async"],
@@ -624,6 +629,8 @@ function buildAgentJson(episode, baseUrl) {
       ask: `${baseUrl}/ask`,
       askGet: `${baseUrl}/ask?q={query}`,
       askAsync: `${baseUrl}/ask?async=1`,
+      searchAsync: `${baseUrl}/api/search?q={query}&async=1`,
+      jobsCreate: `${baseUrl}/jobs`,
       jobs: `${baseUrl}/jobs/{id}`,
       status: `${baseUrl}/status`,
       mcp: `${baseUrl}/mcp`,
@@ -1553,6 +1560,7 @@ export async function onRequest({ request, next, env }) {
     path === "/donate" ||
     path.startsWith("/api/") ||
     path.startsWith("/oauth/") ||
+    path === "/jobs" ||
     path.startsWith("/jobs/")
   ) {
     const resp = await next();

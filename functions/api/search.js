@@ -3,7 +3,7 @@
 // Use this from agents that don't want to download search-index.json.
 
 import { searchEpisodes } from "../_search.js";
-import { apiOk, apiError, corsPreflight, errors } from "../_api.js";
+import { apiOk, apiError, apiHeaders, corsPreflight, errors } from "../_api.js";
 
 // Validation matches OpenAPI minLength/maxLength + integer bounds. Anything
 // outside that range returns 400 with a structured error — no silent clamps,
@@ -74,9 +74,52 @@ export async function onRequestGet({ request }) {
     offset = parsed;
   }
 
+  const baseUrl = `${url.protocol}//${url.host}`;
+
+  // Async mode — POST /api/search?async=1 (also accepts the RFC 7240
+  // Prefer: respond-async request header) returns 202 Accepted with
+  // Location: /jobs/<id> + Retry-After. GET on the polling URL runs
+  // the search and returns the result.
+  const asyncQs = (url.searchParams.get("async") || "").toLowerCase();
+  const wantsAsync = asyncQs === "1" || asyncQs === "true" || asyncQs === "yes" ||
+    /\brespond-async\b/i.test(request.headers.get("prefer") || "");
+  if (wantsAsync) {
+    const spec = {
+      kind: "search",
+      q,
+      limit,
+      offset,
+      created_at: new Date().toISOString(),
+    };
+    const json = JSON.stringify(spec);
+    const bytes = new TextEncoder().encode(json);
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    const id = btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const pollUrl = `${baseUrl}/jobs/${id}`;
+    return new Response(
+      JSON.stringify({
+        job_id: id,
+        status: "pending",
+        kind: spec.kind,
+        poll_url: pollUrl,
+        retry_after_seconds: 1,
+        created_at: spec.created_at,
+        docs_url: `${baseUrl}/api/llms.txt#async`,
+      }),
+      {
+        status: 202,
+        headers: apiHeaders({
+          Location: pollUrl,
+          "Retry-After": "1",
+          "Cache-Control": "no-store",
+        }),
+      }
+    );
+  }
+
   try {
     const t0 = Date.now();
-    const baseUrl = `${url.protocol}//${url.host}`;
     const { results, total } = searchEpisodes(q, { limit, offset, baseUrl });
     const took_ms = Date.now() - t0;
     const has_more = offset + results.length < total;

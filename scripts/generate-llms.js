@@ -415,7 +415,7 @@ api.push("Set `Accept: text/event-stream` (or `Prefer: streaming=true`) for SSE:
 api.push("");
 api.push(`### Async (202 Accepted + polling)`);
 api.push("");
-api.push(`Long-running operations can opt into the async pattern: \`POST ${SITE}/ask?async=1\` (or send \`Prefer: respond-async\`) returns **HTTP 202 Accepted** with \`Location: /jobs/<id>\`, \`Retry-After: 1\`, and a JSON body \`{ job_id, status: "pending", poll_url, retry_after_seconds }\`. Poll \`GET ${SITE}/jobs/<id>\` until \`status\` flips from \`"pending"\` to \`"completed"\`; the final response carries the result under \`.result\`.`);
+api.push(`Long-running operations can opt into the async pattern. Three interchangeable entry points: **\`POST ${SITE}/jobs\`** with body \`{ kind: "ask"|"search", query, limit }\` (conventional path), **\`POST ${SITE}/ask?async=1\`** (or \`?async=1\` on \`/api/search\`), or set **\`Prefer: respond-async\`** on any of the above. All return **HTTP 202 Accepted** with \`Location: /jobs/<id>\`, \`Retry-After: 1\`, and a JSON body \`{ job_id, status: "pending", poll_url, retry_after_seconds }\`. Poll \`GET ${SITE}/jobs/<id>\` until \`status\` flips from \`"pending"\` to \`"completed"\`; the final response carries the result under \`.result\`.`);
 api.push("");
 api.push("```bash");
 api.push(`# 1. Kick off the job — 202 Accepted`);

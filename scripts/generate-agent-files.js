@@ -61,6 +61,8 @@ const agentJson = {
     ask: `${SITE}/ask`,
     askGet: `${SITE}/ask?q={query}`,
     askAsync: `${SITE}/ask?async=1`,
+    searchAsync: `${SITE}/api/search?q={query}&async=1`,
+    jobsCreate: `${SITE}/jobs`,
     jobs: `${SITE}/jobs/{id}`,
     status: `${SITE}/status`,
     mcp: `${SITE}/mcp`,
@@ -124,7 +126,12 @@ const agentJson = {
   async: {
     supported: true,
     pattern: "202-accepted-with-location",
-    entryPoints: [`${SITE}/ask?async=1`],
+    entryPoints: [
+      `${SITE}/jobs`,
+      `${SITE}/ask?async=1`,
+      `${SITE}/api/search?q={query}&async=1`,
+    ],
+    jobsCreate: `${SITE}/jobs`,
     pollEndpoint: `${SITE}/jobs/{id}`,
     headers: {
       request: ["Prefer: respond-async"],
@@ -398,7 +405,7 @@ agents.push(`| \"Browse the catalog\" | \`GET ${SITE}/episodes.json\` or \`GET $
 agents.push(`| Health check / circuit-breaker | \`GET ${SITE}/status\` |`);
 agents.push(`| Native MCP tool calls | \`POST ${SITE}/mcp\` (Streamable HTTP, JSON-RPC 2.0) |`);
 agents.push(`| MCP server preview before connect | \`GET ${SITE}/.well-known/mcp/server-card.json\` |`);
-agents.push(`| Async (202 + polling) | \`POST ${SITE}/ask?async=1\` → 202 + \`Location: /jobs/<id>\`; \`GET ${SITE}/jobs/<id>\` until \`status: completed\` |`);
+agents.push(`| Async (202 + polling) | \`POST ${SITE}/jobs\` (or \`POST ${SITE}/ask?async=1\`, or \`POST ${SITE}/api/search?async=1\`) → 202 + \`Location: /jobs/<id>\`; \`GET ${SITE}/jobs/<id>\` until \`status: completed\` |`);
 agents.push("");
 agents.push("## Rate limits");
 agents.push("");

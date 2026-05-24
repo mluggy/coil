@@ -259,15 +259,15 @@ describe("MCP App view CSP (resources/read)", () => {
     expect(csp).toMatch(/connect-src[^;]*https:\/\/claude\.ai/);
   });
 
-  it("uses a hex nonce on style-src — no 'unsafe-inline', no special chars", () => {
+  it("uses 'self' + hex nonce on style-src — origin token, no 'unsafe-inline', no special chars", () => {
     const csp = html.match(/content="([^"]+)"/)[1];
-    // Hex only ([0-9a-f]); avoids hyphens/underscores in the nonce so
-    // naïve `'nonce-([A-Za-z0-9]+)'` parsers don't break mid-value.
-    expect(csp).toMatch(/style-src 'nonce-[0-9a-f]{32}'/);
+    // 'self' alongside the nonce so the directive lists an explicit
+    // origin token; hex-only nonce so naïve parsers don't break on
+    // hyphens / underscores.
+    expect(csp).toMatch(/style-src 'self' 'nonce-[0-9a-f]{32}'/);
     expect(csp).not.toMatch(/style-src[^;]*'unsafe-inline'/);
-    // The same nonce must appear on the <style> tag so the stylesheet
-    // is allowed to execute.
-    const nonce = csp.match(/style-src 'nonce-([^']+)'/)[1];
+    // The nonce must appear on the <style> tag so the stylesheet runs.
+    const nonce = csp.match(/'nonce-([0-9a-f]+)'/)[1];
     expect(html).toContain(`<style nonce="${nonce}">`);
   });
 

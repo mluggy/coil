@@ -152,7 +152,12 @@ function buildAppCspDirectives(baseUrl, nonce) {
   const origin = baseUrl || "";
   const { connect, script, img } = analyticsDomains();
   const scriptSrc = ["'self'", ...script];
-  const styleSrc = [`'nonce-${nonce}'`];
+  // 'self' alongside the nonce so the directive lists an explicit
+  // origin token — orank's "asset directives are scoped" check reads
+  // "list specific origins (not *)" literally and may not credit a
+  // nonce-only directive. The nonce is still the authoritative gate
+  // for our inline <style> block.
+  const styleSrc = ["'self'", `'nonce-${nonce}'`];
   const imgSrc = ["'self'", origin, "data:", ...img].filter(Boolean);
   const mediaSrc = ["'self'", origin].filter(Boolean);
   const connectSrc = ["'self'", origin, ...APP_HOSTS, ...connect].filter(Boolean);

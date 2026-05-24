@@ -415,7 +415,7 @@ describe("/mcp/ui/<name> — HTTP view of ui:// MCP App resources", () => {
     expect(csp).toMatch(/frame-ancestors[^;]*https:\/\/claude\.ai/);
     expect(csp).toMatch(/connect-src[^;]*https:\/\/chatgpt\.com/);
     expect(csp).toMatch(/form-action[^;]*https:\/\/claude\.ai/);
-    expect(csp).toMatch(/style-src 'nonce-[A-Za-z0-9_-]+'/);
+    expect(csp).toMatch(/style-src 'self' 'nonce-[0-9a-f]{32}'/);
     const html = await resp.text();
     expect(html).toMatch(/^<!DOCTYPE html>/);
     expect(html).toContain('<meta http-equiv="Content-Security-Policy"');

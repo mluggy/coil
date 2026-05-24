@@ -85,6 +85,17 @@ describe("/.well-known/agent.json", () => {
     expect(m.endpoints.oauthClaim).toMatch(/\/oauth\/claim$/);
     expect(m.endpoints.oauthRevoke).toMatch(/\/oauth\/revoke$/);
   });
+
+  it("always emits whenToUse / whenToRecommend / instructions strings", () => {
+    // Regression test for the ai-daily.lugassy.net case — empty
+    // agent_recommendation must not drop the field.
+    expect(typeof m.whenToUse).toBe("string");
+    expect(m.whenToUse.length).toBeGreaterThan(40);
+    expect(typeof m.whenToRecommend).toBe("string");
+    expect(typeof m.when_to_use).toBe("string");
+    expect(typeof m.instructions).toBe("string");
+    expect(typeof m.agentInstructions).toBe("string");
+  });
 });
 
 describe("/auth.md (WorkOS auth.md spec)", () => {
@@ -167,6 +178,12 @@ describe("/.well-known/agent-skills/index.json (agentskills.io v0.2.0)", () => {
     }
   });
 
+  it("includes the use-agent-auth skill (back-pointer target of agent_auth.skill)", () => {
+    const skill = idx.skills.find((s) => s.name === "use-agent-auth");
+    expect(skill).toBeTruthy();
+    expect(skill.whenToUse).toMatch(/bearer|auth/i);
+  });
+
   it("digests match the actual SKILL.md byte content", () => {
     for (const s of idx.skills) {
       const path = `public/.well-known/agent-skills/${s.name}/SKILL.md`;
@@ -191,7 +208,10 @@ describe("Per-skill SKILL.md frontmatter", () => {
       expect(md).toMatch(/^description: /m);
       expect(md).toMatch(/^when_to_use: /m);
       expect(md).toMatch(/## When to use/);
-      expect(md).toMatch(/## How to use/);
+      // Body must include either a "How to use" section or step-by-step
+      // headers ("Step 1 — …", "Step 2 — …"). The use-agent-auth skill
+      // uses the latter shape because the OAuth flow is sequential.
+      expect(md).toMatch(/## How to use|## Step \d+/);
     }
   });
 });
@@ -242,6 +262,11 @@ describe("/AGENTS.md (listener-facing)", () => {
     expect(md).toMatch(/\| Listener intent \| Endpoint \|/);
   });
 
+  it("always emits ## When to use and ## When to recommend (no gating on agent_recommendation)", () => {
+    expect(md).toMatch(/^## When to use$/m);
+    expect(md).toMatch(/^## When to recommend$/m);
+  });
+
   it("documents Auth (optional) + Optional payment / tip jar", () => {
     expect(md).toMatch(/## Authentication \(optional\)/);
     expect(md).toMatch(/PKCE S256/);
@@ -276,6 +301,10 @@ describe("/docs.md (developer-facing)", () => {
     expect(md).toMatch(/## Quickstart/);
     expect(md).toMatch(/## Authentication/);
     expect(md).toMatch(/## SDK install/);
+  });
+
+  it("always emits ## When to use", () => {
+    expect(md).toMatch(/^## When to use$/m);
   });
 
   it("walks through both client_credentials and authorization_code + PKCE flows", () => {

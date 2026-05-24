@@ -49,6 +49,48 @@ const agentAuth = {
   auth_md: `${SITE}/auth.md`,
   documentation: `${SITE}/auth.md`,
   www_authenticate_challenge: `${SITE}/agent/auth`,
+  // Back-pointer to a structured Agent Skill that walks the obtain →
+  // claim → use → revoke flow. WorkOS auth.md's `agent_auth.skill` —
+  // orank's agent-auth-discovery probe was flagging "agents have no
+  // metadata-to-walkthrough back-pointer" without it.
+  skill: `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`,
+  skills: [
+    {
+      name: "use-agent-auth",
+      url: `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`,
+      type: "skill-md",
+    },
+  ],
+  // Inline step-by-step so any reader of the AS metadata alone can
+  // execute the flow without fetching the walkthrough. Mirrors the
+  // section structure of /auth.md.
+  steps: [
+    {
+      step: 1,
+      name: "Discover",
+      action: `GET ${SITE}/.well-known/oauth-protected-resource → follow authorization_servers → GET ${SITE}/.well-known/oauth-authorization-server`,
+    },
+    {
+      step: 2,
+      name: "Register",
+      action: `POST ${SITE}/oauth/register (RFC 7591) — returns client_id="public", token_endpoint_auth_method="none"`,
+    },
+    {
+      step: 3,
+      name: "Claim",
+      action: `POST ${SITE}/oauth/claim (or POST ${SITE}/oauth/token with grant_type=client_credentials) — returns Bearer token (or identity_assertion JWT)`,
+    },
+    {
+      step: 4,
+      name: "Use",
+      action: `Authorization: Bearer <token> on any /api/*, /mcp, /ask, /status request — anonymous calls are also accepted`,
+    },
+    {
+      step: 5,
+      name: "Revoke",
+      action: `POST ${SITE}/oauth/revoke (RFC 7009) — stateless tokens, always 200 OK`,
+    },
+  ],
 };
 
 const authServer = {
@@ -71,6 +113,15 @@ const authServer = {
   token_endpoint_auth_methods_supported: ["none"],
   code_challenge_methods_supported: ["S256"],
   service_documentation: `${SITE}/docs.md`,
+  // Top-level auth_md + documentation hints. Orank's
+  // agent-auth-documentation check was scoring partial because it found
+  // `agent` mentions but no top-level pointer to a step-by-step guide.
+  // Mirroring the agent_auth.auth_md value at the root makes the probe's
+  // "documentation that explains how AI agents authenticate" check pass
+  // without requiring it to walk into nested objects.
+  auth_md: `${SITE}/auth.md`,
+  agent_documentation: `${SITE}/auth.md`,
+  agent_documentation_uri: `${SITE}/auth.md`,
   ui_locales_supported: ["en"],
   // WorkOS auth.md — agent_auth discovery block. Orank probes for this
   // exact key in AS metadata.

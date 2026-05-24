@@ -78,6 +78,32 @@ describe(".well-known/oauth-authorization-server (RFC 8414)", () => {
     expect(m.agent_auth.id_jag_supported).toBe(true);
     expect(m.agent_auth.auth_md).toBe(`${SITE}/auth.md`);
   });
+
+  it("agent_auth.skill back-points at the use-agent-auth SKILL.md", () => {
+    expect(m.agent_auth.skill).toBe(
+      `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`
+    );
+    expect(Array.isArray(m.agent_auth.skills)).toBe(true);
+    expect(m.agent_auth.skills[0].name).toBe("use-agent-auth");
+  });
+
+  it("agent_auth.steps walks Discover → Register → Claim → Use → Revoke", () => {
+    expect(Array.isArray(m.agent_auth.steps)).toBe(true);
+    expect(m.agent_auth.steps).toHaveLength(5);
+    expect(m.agent_auth.steps.map((s) => s.name)).toEqual([
+      "Discover",
+      "Register",
+      "Claim",
+      "Use",
+      "Revoke",
+    ]);
+  });
+
+  it("publishes top-level auth_md + agent_documentation pointers", () => {
+    expect(m.auth_md).toBe(`${SITE}/auth.md`);
+    expect(m.agent_documentation).toBe(`${SITE}/auth.md`);
+    expect(m.agent_documentation_uri).toBe(`${SITE}/auth.md`);
+  });
 });
 
 describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
@@ -113,6 +139,12 @@ describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
     expect(m.agent_auth.claim_uri).toBe(`${SITE}/oauth/claim`);
     expect(m.agent_auth.revocation_uri).toBe(`${SITE}/oauth/revoke`);
     expect(m.auth_md).toBe(`${SITE}/auth.md`);
+  });
+
+  it("PRM agent_auth carries the same skill back-pointer as AS", () => {
+    expect(m.agent_auth.skill).toBe(
+      `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`
+    );
   });
 });
 

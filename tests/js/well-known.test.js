@@ -219,51 +219,62 @@ describe("robots.txt", () => {
     txt = readFileSync("public/robots.txt", "utf8");
   });
 
-  it("allows DeepSeekBot in TIER 1", () => {
-    expect(txt).toMatch(/User-agent: DeepSeekBot\nContent-Signal:[^\n]+\nAllow: \//);
-  });
-
-  it("declares per-bot Content-Signal headers in TIER 1", () => {
-    // Every TIER 1 entry has a Content-Signal line above the Allow.
-    const tier1 = txt.split("# TIER 2 ")[0];
-    const matches = tier1.match(/Content-Signal: search=yes, ai-input=yes(?!, ai-train=)/g) || [];
-    expect(matches.length).toBeGreaterThanOrEqual(10);
-  });
-
-  it("gates TIER 2 training crawlers on ai_training", () => {
-    // ai_training: true → training crawlers Allowed; false → Disallowed.
-    const rule = config.ai_training ? "Allow" : "Disallow";
-    for (const bot of ["GPTBot", "ClaudeBot", "CCBot", "Bytespider"]) {
-      expect(txt).toMatch(new RegExp(`User-agent: ${bot}\\n[^\\n]*\\n${rule}: /`));
-    }
-  });
-
-  it("declares the ai-train Content-Signal on TIER 2 bots per ai_training", () => {
-    const train = config.ai_training ? "yes" : "no";
-    expect(txt).toMatch(
-      new RegExp(`User-agent: GPTBot\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}`)
-    );
-  });
-
-  it("emits a global Content-Signal for User-agent: * matching ai_training", () => {
-    const train = config.ai_training ? "yes" : "no";
-    expect(txt).toMatch(
-      new RegExp(`User-agent: \\*\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}`)
-    );
-  });
-
-  it("declares Sitemap and Schemamap", () => {
+  it("declares Sitemap and Schemamap at the top", () => {
     expect(txt).toMatch(/^Sitemap: \{\{SITE_URL\}\}\/sitemap\.xml$/m);
     expect(txt).toMatch(/^Schemamap: \{\{SITE_URL\}\}\/\.well-known\/schema-map\.xml$/m);
   });
 
-  it("orders TIER 0 → TIER 1 → TIER 2", () => {
-    const t0 = txt.indexOf("# TIER 0");
-    const t1 = txt.indexOf("# TIER 1");
-    const t2 = txt.indexOf("# TIER 2");
-    expect(t0).toBeGreaterThanOrEqual(0);
-    expect(t1).toBeGreaterThan(t0);
-    expect(t2).toBeGreaterThan(t1);
+  it("allows runtime answer engines under one grouped rule (Content-Signal: search=yes, ai-input=yes / Allow: /)", () => {
+    // forter-style grouped block — all User-agent lines share one
+    // Content-Signal + Allow.
+    for (const bot of [
+      "ChatGPT-User", "OAI-SearchBot", "PerplexityBot", "Perplexity-User",
+      "Claude-User", "Claude-SearchBot", "Applebot", "Googlebot",
+      "Google-CloudVertexBot", "DuckAssistBot", "Amazonbot",
+      "MistralAI-User", "Cohere-AI", "DeepSeekBot",
+    ]) {
+      expect(txt, `${bot} missing`).toMatch(new RegExp(`^User-agent: ${bot}$`, "m"));
+    }
+    // The runtime group contains the search=yes, ai-input=yes signal
+    // (no ai-train= suffix) followed by Allow: /.
+    expect(txt).toMatch(/Content-Signal: search=yes, ai-input=yes\nAllow: \//);
+  });
+
+  it("always blocks training-only crawlers (orank robots-ai-policy-quality)", () => {
+    // CCBot + Bytespider + Meta + scrapers — Disallow regardless of
+    // ai_training. orank awards the point for blocking these.
+    for (const bot of [
+      "CCBot", "Bytespider", "FacebookBot", "Meta-ExternalAgent",
+      "ImagesiftBot", "Diffbot", "omgili", "omgilibot",
+    ]) {
+      expect(txt, `${bot} missing from blocked group`).toMatch(new RegExp(`^User-agent: ${bot}$`, "m"));
+    }
+    expect(txt).toMatch(/Content-Signal: search=no, ai-input=no, ai-train=no\nDisallow: \//);
+  });
+
+  it("gates mixed training+reasoning crawlers on ai_training", () => {
+    const rule = config.ai_training ? "Allow" : "Disallow";
+    const train = config.ai_training ? "yes" : "no";
+    // GPTBot / ClaudeBot / anthropic-ai / Google-Extended / Applebot-
+    // Extended all share the same rule block (grouped).
+    for (const bot of ["GPTBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "Applebot-Extended"]) {
+      expect(txt, `${bot} missing`).toMatch(new RegExp(`^User-agent: ${bot}$`, "m"));
+    }
+    expect(txt).toMatch(
+      new RegExp(`Content-Signal: search=yes, ai-input=yes, ai-train=${train}\\n${rule}: /`),
+    );
+  });
+
+  it("emits a generic User-agent: * with Content-Signal + Crawl-delay", () => {
+    const train = config.ai_training ? "yes" : "no";
+    expect(txt).toMatch(
+      new RegExp(`User-agent: \\*\\nContent-Signal: search=yes, ai-input=yes, ai-train=${train}\\nCrawl-delay: \\d+\\nAllow: /`),
+    );
+  });
+
+  it("is concise — no more than 60 lines (forter-style grouping)", () => {
+    const lines = txt.split("\n").length;
+    expect(lines, `robots.txt grew to ${lines} lines — review grouping`).toBeLessThanOrEqual(60);
   });
 });
 

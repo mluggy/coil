@@ -83,6 +83,53 @@ describe("/.well-known/openapi.json", () => {
     expect(json).toMatch(/"\$ref":\s*"#\/components\/schemas\/Error"/);
   });
 
+  it("every named error response references the shared Error schema in BOTH application/json AND application/problem+json", () => {
+    // Typed-error-model probe wants consistent shape across every 4xx/5xx
+    // response and RFC 7807 media-type adoption.
+    const named = ["BadRequest", "NotFound", "MethodNotAllowed", "RateLimited", "InternalError"];
+    for (const r of named) {
+      const resp = spec.components.responses[r];
+      expect(resp, `missing response: ${r}`).toBeTruthy();
+      expect(resp.content?.["application/json"]?.schema?.$ref).toBe("#/components/schemas/Error");
+      expect(resp.content?.["application/problem+json"]?.schema?.$ref).toBe("#/components/schemas/Error");
+    }
+  });
+
+  it("every POST operation declares Idempotency-Key as a header parameter", () => {
+    // Mutation endpoints should accept Idempotency-Key per Stripe / IETF
+    // draft-ietf-httpapi-idempotency-key-header so agents can retry safely.
+    const postOps = [];
+    for (const [path, methods] of Object.entries(spec.paths)) {
+      if (methods.post) postOps.push({ path, op: methods.post });
+    }
+    expect(postOps.length).toBeGreaterThan(0);
+    for (const { path, op } of postOps) {
+      const params = op.parameters || [];
+      const refs = params.map((p) => p.$ref).filter(Boolean);
+      expect(
+        refs.includes("#/components/parameters/IdempotencyKey"),
+        `POST ${path} (${op.operationId}) is missing Idempotency-Key parameter`,
+      ).toBe(true);
+    }
+  });
+
+  it("declares the IdempotencyKey shared parameter", () => {
+    const p = spec.components?.parameters?.IdempotencyKey;
+    expect(p).toBeTruthy();
+    expect(p.in).toBe("header");
+    expect(p.name).toBe("Idempotency-Key");
+    expect(p.required).toBe(false);
+  });
+
+  it("declares /jobs + /jobs/{id} operations with the 202/200 envelope", () => {
+    expect(spec.paths["/jobs"]?.post?.operationId).toBe("createJob");
+    expect(spec.paths["/jobs"].post.responses["202"]).toBeTruthy();
+    expect(spec.paths["/jobs/{id}"]?.get?.operationId).toBe("getJob");
+    expect(spec.components.schemas.JobCreated).toBeTruthy();
+    expect(spec.components.schemas.JobStatus).toBeTruthy();
+    expect(spec.components.schemas.JobSpec).toBeTruthy();
+  });
+
   it("declares typed component schemas (EpisodeList, McpManifest, etc.)", () => {
     const expected = ["EpisodeList", "SearchIndex", "RssFeed", "McpManifest"];
     for (const name of expected) {

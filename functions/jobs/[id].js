@@ -117,11 +117,18 @@ async function handleJob(ctx) {
       kind: spec.kind,
       created_at: spec.created_at,
       completed_at: new Date().toISOString(),
+      // Echo the idempotency key that was folded into the spec at
+      // creation, so polling clients can verify it matches what they
+      // originally sent.
+      ...(spec.idempotency_key ? { idempotency_key: spec.idempotency_key } : {}),
       ...(result.error ? { error: result.error } : { result }),
     }),
     {
       status: 200,
-      headers: apiHeaders({ "Cache-Control": "no-store" }),
+      headers: apiHeaders({
+        "Cache-Control": "no-store",
+        ...(spec.idempotency_key ? { "Idempotency-Key": spec.idempotency_key } : {}),
+      }),
     }
   );
 }

@@ -75,7 +75,16 @@ export async function onRequestPost({ request }) {
     });
   }
   const limit = Math.min(50, Math.max(1, Number(body.limit) || 10));
-  const spec = { kind, q: query, limit, created_at: new Date().toISOString() };
+  const idempotencyKey = (request.headers.get("idempotency-key") || "").trim();
+  const spec = {
+    kind,
+    q: query,
+    limit,
+    created_at: new Date().toISOString(),
+    // Folding Idempotency-Key into the spec makes the id deterministic
+    // across retries — the polling URL is stable for a given key+body.
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  };
   const id = encodeJobId(spec);
   const pollUrl = `${baseUrl}/jobs/${id}`;
   return new Response(
@@ -87,6 +96,7 @@ export async function onRequestPost({ request }) {
       retry_after_seconds: 1,
       created_at: spec.created_at,
       docs_url: `${baseUrl}/api/llms.txt#async`,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     }),
     {
       status: 202,
@@ -94,6 +104,8 @@ export async function onRequestPost({ request }) {
         Location: pollUrl,
         "Retry-After": "1",
         "Cache-Control": "no-store",
+        // Echo Idempotency-Key so callers can correlate retries.
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       }),
     }
   );

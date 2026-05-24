@@ -84,12 +84,14 @@ export async function onRequestGet({ request }) {
   const wantsAsync = asyncQs === "1" || asyncQs === "true" || asyncQs === "yes" ||
     /\brespond-async\b/i.test(request.headers.get("prefer") || "");
   if (wantsAsync) {
+    const idempotencyKey = (request.headers.get("idempotency-key") || "").trim();
     const spec = {
       kind: "search",
       q,
       limit,
       offset,
       created_at: new Date().toISOString(),
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     };
     const json = JSON.stringify(spec);
     const bytes = new TextEncoder().encode(json);
@@ -106,6 +108,7 @@ export async function onRequestGet({ request }) {
         retry_after_seconds: 1,
         created_at: spec.created_at,
         docs_url: `${baseUrl}/api/llms.txt#async`,
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       }),
       {
         status: 202,
@@ -113,6 +116,7 @@ export async function onRequestGet({ request }) {
           Location: pollUrl,
           "Retry-After": "1",
           "Cache-Control": "no-store",
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         }),
       }
     );

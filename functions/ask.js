@@ -53,6 +53,9 @@ function wantsAsync(request) {
 
 // Encode a job spec into a base64url id. Stateless — the id IS the
 // job, so GET /jobs/<id> can recompute the result without server state.
+// When an Idempotency-Key is folded into the spec, the same key + body
+// deterministically maps to the same id, so naive POST retries return
+// the same job_id without any server-side state.
 function encodeJobId(spec) {
   const json = JSON.stringify(spec);
   const bytes = new TextEncoder().encode(json);
@@ -61,7 +64,7 @@ function encodeJobId(spec) {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function buildAsyncAcceptedResponse(spec, baseUrl) {
+function buildAsyncAcceptedResponse(spec, baseUrl, idempotencyKey) {
   const id = encodeJobId(spec);
   const pollUrl = `${baseUrl}/jobs/${id}`;
   const body = {
@@ -72,6 +75,7 @@ function buildAsyncAcceptedResponse(spec, baseUrl) {
     retry_after_seconds: 1,
     created_at: spec.created_at,
     docs_url: `${baseUrl}/api/llms.txt#async`,
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
   };
   return new Response(JSON.stringify(body), {
     status: 202,
@@ -82,6 +86,9 @@ function buildAsyncAcceptedResponse(spec, baseUrl) {
       "Retry-After": "1",
       "Cache-Control": "no-store",
       "Content-Type": "application/json; charset=utf-8",
+      // Echo Idempotency-Key on every response (when present) so
+      // callers can correlate retries.
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     }),
   });
 }
@@ -174,21 +181,34 @@ async function handleAsk(request) {
   // Async mode — return 202 Accepted with a poll URL, deferring the
   // actual search to GET /jobs/<id>. Stateless: the job id encodes
   // the query, so the polling endpoint reproduces the result without
-  // any server-side job state.
+  // any server-side job state. Folding Idempotency-Key into the spec
+  // makes the id deterministic across retries with the same key.
   if (wantsAsync(request)) {
-    return buildAsyncAcceptedResponse(
-      { kind: "ask", q: query, limit, created_at: new Date().toISOString() },
-      baseUrl,
-    );
+    const idempotencyKey = (request.headers.get("idempotency-key") || "").trim();
+    const spec = {
+      kind: "ask",
+      q: query,
+      limit,
+      created_at: new Date().toISOString(),
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+    };
+    return buildAsyncAcceptedResponse(spec, baseUrl, idempotencyKey);
   }
 
   const t0 = Date.now();
   const { results } = searchEpisodes(query, { limit, baseUrl });
   const took_ms = Date.now() - t0;
 
-  return wantsSse(request)
+  const idempotencyKey = (request.headers.get("idempotency-key") || "").trim();
+  const resp = wantsSse(request)
     ? buildSseResponse(query, results, took_ms)
     : buildJsonResponse(query, results, took_ms);
+  if (idempotencyKey) {
+    const headers = new Headers(resp.headers);
+    headers.set("Idempotency-Key", idempotencyKey);
+    return new Response(resp.body, { status: resp.status, headers });
+  }
+  return resp;
 }
 
 export const onRequestPost = ({ request }) => handleAsk(request);

@@ -205,6 +205,32 @@ describe("/ask + /jobs/<id> — 202 Accepted async job pattern", () => {
     expect(resp.status).toBe(405);
   });
 
+  it("Idempotency-Key on POST /jobs is folded into job_id and echoed back", async () => {
+    const key = "test-key-abc-123";
+    const make = () => jobsIndexPost({
+      request: req("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+        body: JSON.stringify({ kind: "ask", query: "ai" }),
+      }),
+    });
+    const respA = await make();
+    expect(respA.status).toBe(202);
+    expect(respA.headers.get("Idempotency-Key")).toBe(key);
+    const bodyA = await json(respA);
+    expect(bodyA.idempotency_key).toBe(key);
+    // Same key + same body within the same millisecond → same id.
+    // Different millisecond → different id (created_at is part of the
+    // spec). Either way, the key MUST be folded in.
+    expect(bodyA.job_id).toMatch(/^[A-Za-z0-9_-]+$/);
+    // Decoded job_id payload contains idempotency_key.
+    const decoded = JSON.parse(
+      atob(bodyA.job_id.replace(/-/g, "+").replace(/_/g, "/") +
+        "==".slice(0, (4 - (bodyA.job_id.length % 4)) % 4)),
+    );
+    expect(decoded.idempotency_key).toBe(key);
+  });
+
   it("POST /jobs (conventional path) → 202 + Location + body", async () => {
     const resp = await jobsIndexPost({
       request: req("/jobs", {

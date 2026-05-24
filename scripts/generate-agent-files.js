@@ -71,6 +71,30 @@ const agentJson = {
     indexMarkdown: `${SITE}/index.md`,
     agentMode: `${SITE}/?mode=agent`,
     agents: `${SITE}/AGENTS.md`,
+    // WorkOS auth.md surface — the prose walkthrough and the 401
+    // WWW-Authenticate challenge endpoint. Listed so a single GET on
+    // agent.json hands an agent everything it needs to onboard.
+    authMd: `${SITE}/auth.md`,
+    agentAuthChallenge: `${SITE}/agent/auth`,
+    oauthAuthorizationServer: `${SITE}/.well-known/oauth-authorization-server`,
+    oauthProtectedResource: `${SITE}/.well-known/oauth-protected-resource`,
+    oauthClaim: `${SITE}/oauth/claim`,
+    oauthRevoke: `${SITE}/oauth/revoke`,
+    oauthRegister: `${SITE}/oauth/register`,
+  },
+  // Top-level agent_auth block per WorkOS auth.md so scanners that
+  // only parse the agent.json envelope don't have to follow a second
+  // hop into RFC 8414 metadata.
+  agent_auth: {
+    register_uri: `${SITE}/oauth/register`,
+    claim_uri: `${SITE}/oauth/claim`,
+    revocation_uri: `${SITE}/oauth/revoke`,
+    identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+    identity_assertion_supported: true,
+    id_jag_supported: true,
+    id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    auth_md: `${SITE}/auth.md`,
+    www_authenticate_challenge: `${SITE}/agent/auth`,
   },
   rateLimits: {
     perMinute: 60,
@@ -212,6 +236,9 @@ const schemaMap = `<?xml version="1.0" encoding="UTF-8"?>
   <feed url="${SITE}/.well-known/openapi.json" type="application/json" />
   <feed url="${SITE}/.well-known/mcp" type="application/json" />
   <feed url="${SITE}/mcp" type="application/json" />
+  <feed url="${SITE}/auth.md" type="text/markdown" />
+  <feed url="${SITE}/.well-known/oauth-authorization-server" type="application/json" />
+  <feed url="${SITE}/.well-known/oauth-protected-resource" type="application/json" />
 </schemamap>
 `;
 
@@ -376,6 +403,8 @@ agents.push("");
 agents.push("- **Zero-auth (default).** No header, no signup. Just call the endpoints.");
 agents.push(`- **Public OAuth 2.1 + PKCE S256** (anonymous client). Discover at \`${SITE}/.well-known/oauth-authorization-server\`; token endpoint at \`${SITE}/oauth/token\` (\`grant_type=client_credentials\` or \`authorization_code\`). Scopes: \`read:episodes\`, \`read:transcripts\`, \`search:episodes\` — all granted automatically. \`client_id=public\`, no client secret.`);
 agents.push("");
+agents.push(`Full walkthrough (WorkOS auth.md spec — \`agent_auth\`, \`register_uri\`, \`identity_assertion\`, id-jag, \`WWW-Authenticate\`): [\`${SITE}/auth.md\`](${SITE}/auth.md). Live 401 challenge with \`WWW-Authenticate: Bearer resource_metadata=…\`: \`GET ${SITE}/agent/auth\`.`);
+agents.push("");
 agents.push("## Modes & negotiation");
 agents.push("");
 agents.push(`- \`?mode=agent\` on \`/\` or \`/<id>\` → compact JSON envelope`);
@@ -537,6 +566,29 @@ const apiCatalog = {
         { href: `${SITE}/llms.txt`, type: "text/plain", title: "llms.txt briefing" },
         { href: `${SITE}/llms-full.txt`, type: "text/plain", title: "llms-full.txt single-file briefing" },
         { href: `${SITE}/donate`, type: "application/json", title: "x402 tip jar" },
+      ],
+    },
+    {
+      // WorkOS auth.md surface as its own linkset entry — gives orank's
+      // agent-auth probe a single anchor that enumerates auth.md, the
+      // 401 challenge endpoint, and every advertised agent_auth URI.
+      anchor: `${SITE}/auth.md`,
+      "service-desc": [
+        { href: `${SITE}/auth.md`, type: "text/markdown", title: "auth.md walkthrough (WorkOS spec)" },
+      ],
+      "service-doc": [
+        { href: `${SITE}/.well-known/oauth-authorization-server`, type: "application/json", title: "RFC 8414 AS metadata (agent_auth block)" },
+        { href: `${SITE}/.well-known/oauth-protected-resource`, type: "application/json", title: "RFC 9728 PRM metadata (agent_auth block)" },
+        { href: `${SITE}/.well-known/openid-configuration`, type: "application/json", title: "OIDC discovery" },
+      ],
+      item: [
+        { href: `${SITE}/agent/auth`, type: "application/json", title: "401 challenge with WWW-Authenticate: Bearer resource_metadata=…" },
+        { href: `${SITE}/oauth/register`, type: "application/json", title: "register_uri (RFC 7591 DCR)" },
+        { href: `${SITE}/oauth/claim`, type: "application/json", title: "claim_uri (identity_assertion)" },
+        { href: `${SITE}/oauth/revoke`, type: "application/json", title: "revocation_uri (RFC 7009)" },
+        { href: `${SITE}/oauth/token`, type: "application/json", title: "token_endpoint (client_credentials, authorization_code, refresh_token, jwt-bearer/id-jag)" },
+        { href: `${SITE}/oauth/authorize`, type: "application/json", title: "authorization_endpoint (PKCE S256)" },
+        { href: `${SITE}/oauth/jwks.json`, type: "application/json", title: "JWKS" },
       ],
     },
   ],

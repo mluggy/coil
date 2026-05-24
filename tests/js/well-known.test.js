@@ -55,6 +55,29 @@ describe(".well-known/oauth-authorization-server (RFC 8414)", () => {
       expect.arrayContaining(["authorization_code", "client_credentials", "refresh_token"])
     );
   });
+
+  it("advertises the revocation_endpoint (RFC 7009)", () => {
+    expect(m.revocation_endpoint).toBe(`${SITE}/oauth/revoke`);
+  });
+
+  it("includes jwt-bearer grant for id-jag identity assertions", () => {
+    expect(m.grant_types_supported).toContain(
+      "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    );
+  });
+
+  it("publishes WorkOS auth.md agent_auth block", () => {
+    expect(m.agent_auth).toBeTruthy();
+    expect(m.agent_auth.register_uri).toBe(`${SITE}/oauth/register`);
+    expect(m.agent_auth.claim_uri).toBe(`${SITE}/oauth/claim`);
+    expect(m.agent_auth.revocation_uri).toBe(`${SITE}/oauth/revoke`);
+    expect(m.agent_auth.identity_types_supported).toEqual(
+      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+    );
+    expect(m.agent_auth.identity_assertion_supported).toBe(true);
+    expect(m.agent_auth.id_jag_supported).toBe(true);
+    expect(m.agent_auth.auth_md).toBe(`${SITE}/auth.md`);
+  });
 });
 
 describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
@@ -79,6 +102,17 @@ describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
   it("flags auth as optional via x-auth-required: false", () => {
     expect(m["x-auth-required"]).toBe(false);
     expect(m["x-auth-modes"]).toEqual(expect.arrayContaining(["anonymous", "bearer"]));
+  });
+
+  it("cross-links to AS metadata + agent_auth block", () => {
+    expect(m.authorization_server_metadata).toBe(
+      `${SITE}/.well-known/oauth-authorization-server`
+    );
+    expect(m.agent_auth).toBeTruthy();
+    expect(m.agent_auth.register_uri).toBe(`${SITE}/oauth/register`);
+    expect(m.agent_auth.claim_uri).toBe(`${SITE}/oauth/claim`);
+    expect(m.agent_auth.revocation_uri).toBe(`${SITE}/oauth/revoke`);
+    expect(m.auth_md).toBe(`${SITE}/auth.md`);
   });
 });
 

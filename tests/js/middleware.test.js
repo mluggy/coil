@@ -327,6 +327,79 @@ describe("/openapi.json + /swagger.json aliases", () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
   });
+
+  it("/auth alias serves auth.md as markdown", async () => {
+    const resp = await call("/auth");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
+  });
+});
+
+describe("/agent/auth (WorkOS auth.md WWW-Authenticate challenge)", () => {
+  it("returns 401 with spec-shaped WWW-Authenticate", async () => {
+    const resp = await call("/agent/auth");
+    expect(resp.status).toBe(401);
+    const www = resp.headers.get("WWW-Authenticate") || "";
+    expect(www).toMatch(/^Bearer\s/);
+    expect(www).toMatch(/resource_metadata="[^"]+\/\.well-known\/oauth-protected-resource"/);
+    expect(www).toMatch(/auth_md="[^"]+\/auth\.md"/);
+    expect(www).toMatch(/scope="read:episodes read:transcripts search:episodes"/);
+  });
+
+  it("returns JSON body with agent_auth block", async () => {
+    const resp = await call("/agent/auth");
+    const body = JSON.parse(await resp.text());
+    expect(body.error.code).toBe("unauthorized");
+    expect(body.agent_auth.register_uri).toMatch(/\/oauth\/register$/);
+    expect(body.agent_auth.claim_uri).toMatch(/\/oauth\/claim$/);
+    expect(body.agent_auth.revocation_uri).toMatch(/\/oauth\/revoke$/);
+    expect(body.agent_auth.identity_types_supported).toEqual(
+      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+    );
+  });
+
+  it("/.well-known/agent-auth alias works the same way", async () => {
+    const resp = await call("/.well-known/agent-auth");
+    expect(resp.status).toBe(401);
+    expect(resp.headers.get("WWW-Authenticate") || "").toMatch(/^Bearer\s/);
+  });
+});
+
+describe("homepage ?mode=agent — auth.md surface", () => {
+  let body;
+  beforeAll(async () => {
+    const resp = await call("/?mode=agent");
+    body = JSON.parse(await resp.text());
+  });
+
+  it("publishes auth.agent_auth with register/claim/revoke URIs", () => {
+    expect(body.auth.agent_auth).toBeTruthy();
+    expect(body.auth.agent_auth.register_uri).toMatch(/\/oauth\/register$/);
+    expect(body.auth.agent_auth.claim_uri).toMatch(/\/oauth\/claim$/);
+    expect(body.auth.agent_auth.revocation_uri).toMatch(/\/oauth\/revoke$/);
+    expect(body.auth.agent_auth.identity_assertion_supported).toBe(true);
+    expect(body.auth.agent_auth.id_jag_supported).toBe(true);
+  });
+
+  it("publishes auth.auth_md + auth.challenge_url", () => {
+    expect(body.auth.auth_md).toMatch(/\/auth\.md$/);
+    expect(body.auth.challenge_url).toMatch(/\/agent\/auth$/);
+  });
+
+  it("publishes oauthClaim, oauthRevoke, authMd, agentAuthChallenge endpoints", () => {
+    expect(body.endpoints.oauthClaim).toMatch(/\/oauth\/claim$/);
+    expect(body.endpoints.oauthRevoke).toMatch(/\/oauth\/revoke$/);
+    expect(body.endpoints.authMd).toMatch(/\/auth\.md$/);
+    expect(body.endpoints.agentAuthChallenge).toMatch(/\/agent\/auth$/);
+  });
+});
+
+describe("Link header — auth.md alternate", () => {
+  it("advertises /auth.md as a markdown alternate", async () => {
+    const resp = await call("/");
+    const link = resp.headers.get("Link") || "";
+    expect(link).toMatch(/auth\.md>;\s*rel="alternate";\s*type="text\/markdown";\s*title="auth"/);
+  });
 });
 
 describe("legacy redirects", () => {

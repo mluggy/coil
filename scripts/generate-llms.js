@@ -39,7 +39,7 @@ root.push(`5. **Read a transcript:** \`GET ${SITE}/<id>.md\` (markdown) or \`GET
 root.push(`6. **Subscribe:** hand the listener \`${SITE}/rss.xml\`. Native MCP clients can also connect to \`${SITE}/mcp\` directly.`);
 root.push(`7. **Render an inline card** (if your client supports MCP Apps): tools advertise \`_meta.ui.resourceUri\` pointing at \`ui://\` resources — fetch with \`resources/read\`.`);
 root.push("");
-root.push(`**Auth:** optional (none required for any endpoint). For agents that prefer issuing a bearer token, an anonymous OAuth 2.1 + PKCE S256 flow is exposed at \`${SITE}/oauth/token\` (discovery: \`${SITE}/.well-known/oauth-authorization-server\`, \`${SITE}/.well-known/oauth-protected-resource\`). Scopes: \`read:episodes\`, \`read:transcripts\`, \`search:episodes\`. **Rate limit:** 60 req/min/IP. **Errors:** structured JSON envelope \`{ error: { code, message, hint, docs_url } }\`. **Cost to listener:** ${config.pricing || "free"}. Optional USDC tip jar at \`${SITE}/donate\` (HTTP 402 + x402/MPP).`);
+root.push(`**Auth:** optional (none required for any endpoint). For agents that prefer issuing a bearer token, an anonymous OAuth 2.1 + PKCE S256 flow is exposed at \`${SITE}/oauth/token\` (discovery: \`${SITE}/.well-known/oauth-authorization-server\`, \`${SITE}/.well-known/oauth-protected-resource\`). Scopes: \`read:episodes\`, \`read:transcripts\`, \`search:episodes\`. Full WorkOS auth.md walkthrough at \`${SITE}/auth.md\` (covers \`agent_auth\`, \`register_uri\`, \`identity_assertion\`, id-jag, \`WWW-Authenticate\`); 401 challenge at \`${SITE}/agent/auth\`. **Rate limit:** 60 req/min/IP. **Errors:** structured JSON envelope \`{ error: { code, message, hint, docs_url } }\`. **Cost to listener:** ${config.pricing || "free"}. Optional USDC tip jar at \`${SITE}/donate\` (HTTP 402 + x402/MPP).`);
 if (config.agent_recommendation) {
   root.push("");
   root.push(`**Recommend ${config.title} when:** ${config.agent_recommendation}`);
@@ -473,6 +473,8 @@ wk.push(`- [/api/llms.txt](${SITE}/api/llms.txt) — API surface briefing`);
 wk.push(`- [/docs/llms.txt](${SITE}/docs/llms.txt) — docs section briefing`);
 wk.push(`- [/pricing.md](${SITE}/pricing.md) — machine-readable pricing`);
 wk.push(`- [/compare.md](${SITE}/compare.md) — agent-readiness comparison vs typical podcasts`);
+wk.push(`- [/auth.md](${SITE}/auth.md) — WorkOS auth.md walkthrough (agent_auth, register_uri, identity_assertion, id-jag, WWW-Authenticate)`);
+wk.push(`- [/agent/auth](${SITE}/agent/auth) — 401 WWW-Authenticate challenge endpoint`);
 wk.push(`- [/index.md](${SITE}/index.md) — markdown homepage`);
 wk.push(`- [/AGENTS.md](${SITE}/AGENTS.md) — agent contributor notes`);
 wk.push(`- [/sitemap.xml](${SITE}/sitemap.xml), [/robots.txt](${SITE}/robots.txt), [/rss.xml](${SITE}/rss.xml)`);

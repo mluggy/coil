@@ -19,6 +19,7 @@ beforeAll(() => {
       "node scripts/generate-agent-skills.js",
       "node scripts/generate-docs.js",
       "node scripts/generate-pricing.js",
+      "node scripts/generate-auth.js",
     ].join(" && "),
     { stdio: "pipe" }
   );
@@ -67,6 +68,55 @@ describe("/.well-known/agent.json", () => {
     expect(m.errorEnvelope.statusCodes).toEqual(
       expect.arrayContaining([400, 404, 429, 500])
     );
+  });
+
+  it("publishes WorkOS auth.md agent_auth block + auth.md surface URIs", () => {
+    expect(m.agent_auth).toBeTruthy();
+    expect(m.agent_auth.register_uri).toMatch(/\/oauth\/register$/);
+    expect(m.agent_auth.claim_uri).toMatch(/\/oauth\/claim$/);
+    expect(m.agent_auth.revocation_uri).toMatch(/\/oauth\/revoke$/);
+    expect(m.agent_auth.identity_types_supported).toEqual(
+      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+    );
+    expect(m.agent_auth.id_jag_supported).toBe(true);
+    expect(m.agent_auth.auth_md).toMatch(/\/auth\.md$/);
+    expect(m.endpoints.authMd).toMatch(/\/auth\.md$/);
+    expect(m.endpoints.agentAuthChallenge).toMatch(/\/agent\/auth$/);
+    expect(m.endpoints.oauthClaim).toMatch(/\/oauth\/claim$/);
+    expect(m.endpoints.oauthRevoke).toMatch(/\/oauth\/revoke$/);
+  });
+});
+
+describe("/auth.md (WorkOS auth.md spec)", () => {
+  let md;
+  beforeAll(() => {
+    md = read("public/auth.md");
+  });
+
+  it("leads with a top-level heading and has substantial prose", () => {
+    expect(md.split("\n")[0]).toMatch(/^# /);
+    expect(md.length).toBeGreaterThan(200);
+  });
+
+  it("includes all seven WorkOS spec sections", () => {
+    for (const heading of ["Discover", "Pick a method", "Register", "Claim", "Use the credential", "Errors", "Revocation"]) {
+      expect(md).toContain(`## ${heading}`);
+    }
+  });
+
+  it("includes spec anchor keywords (agent_auth, register_uri, identity_assertion, id-jag, WWW-Authenticate)", () => {
+    expect(md).toContain("agent_auth");
+    expect(md).toContain("register_uri");
+    expect(md).toContain("identity_assertion");
+    expect(md).toMatch(/id-?jag/i);
+    expect(md).toContain("WWW-Authenticate");
+  });
+
+  it("references the three agent_auth URIs and the JWKS endpoint", () => {
+    expect(md).toContain("/oauth/register");
+    expect(md).toContain("/oauth/claim");
+    expect(md).toContain("/oauth/revoke");
+    expect(md).toContain("/oauth/jwks.json");
   });
 });
 
@@ -284,7 +334,7 @@ describe("/.well-known/api-catalog (RFC 9727)", () => {
   it("each entry's service-desc points at a machine-readable description", () => {
     // service-desc may target OpenAPI, an MCP server-card, or an
     // agent.json capability declaration — all are valid per RFC 9727.
-    const allowed = /openapi\.json|server-card\.json|agent\.json|agent-card\.json/;
+    const allowed = /openapi\.json|server-card\.json|agent\.json|agent-card\.json|auth\.md/;
     for (const entry of m.linkset) {
       if (entry["service-desc"]) {
         expect(entry["service-desc"][0].href).toMatch(allowed);

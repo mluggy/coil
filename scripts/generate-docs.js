@@ -38,6 +38,8 @@ doc.push("## Authentication");
 doc.push("");
 doc.push("**Auth is optional.** Every endpoint is public, read-only, and CORS-open. Choose one of two modes:");
 doc.push("");
+doc.push(`> Full WorkOS auth.md walkthrough (\`agent_auth\`, \`register_uri\`, \`identity_assertion\`, id-jag, \`WWW-Authenticate\`) lives at [${SITE}/auth.md](${SITE}/auth.md). A live 401 challenge for one-shot discovery is at \`GET ${SITE}/agent/auth\`.`);
+doc.push("");
 doc.push("### 1. Zero-auth (default)");
 doc.push("");
 doc.push("No header, no signup. Just call the endpoints. This is the recommended path for most agents and listener-side integrations.");

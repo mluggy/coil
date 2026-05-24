@@ -170,6 +170,8 @@ export async function onRequest({ request, params, env }) {
   if (route === "/token") return handleToken({ request, baseUrl, signer });
   if (route === "/authorize") return handleAuthorize({ request, baseUrl });
   if (route === "/register") return handleRegister({ request, baseUrl });
+  if (route === "/claim") return handleClaim({ request, baseUrl, signer });
+  if (route === "/revoke") return handleRevoke({ request });
   if (route === "/userinfo") return handleUserinfo({ request });
   if (route === "/jwks.json") return handleJwks(signer);
   if (route === "/" || route === "") return handleIndex({ baseUrl });
@@ -381,6 +383,86 @@ async function handleRegister({ request, baseUrl }) {
   );
 }
 
+// ─── /oauth/claim (WorkOS auth.md identity_assertion) ────────────────────
+// Mints an identity_assertion JWT for the anonymous public client. WorkOS'
+// auth.md spec uses this as the "claim" step — an agent presents an
+// identity (here: anonymous client + per-request subject) and gets back
+// an assertion it can replay against the resource server. For this
+// zero-auth read API the assertion mirrors what /token issues, but with
+// a token_type of `identity_assertion` so id-jag-aware clients can tell
+// it apart from a vanilla bearer.
+async function handleClaim({ request, baseUrl, signer }) {
+  if (request.method !== "POST" && request.method !== "GET") {
+    return apiError({
+      status: 405,
+      code: "method_not_allowed",
+      message: "POST or GET only.",
+    });
+  }
+  let form;
+  if (request.method === "POST") {
+    const ct = request.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
+      const body = await request.json().catch(() => ({}));
+      form = new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)]));
+    } else {
+      form = new URLSearchParams(await request.text());
+    }
+  } else {
+    form = new URL(request.url).searchParams;
+  }
+  const identityType = form.get("identity_type") || "anonymous";
+  const requestedScope = form.get("scope") || SCOPES.join(" ");
+  const grantedScope = requestedScope
+    .split(/\s+/)
+    .filter((s) => SCOPES.includes(s))
+    .join(" ") || SCOPES.join(" ");
+  const subject = `anonymous-${randomToken(8)}`;
+  const assertion = await issueJwt({
+    signer,
+    issuer: baseUrl,
+    subject,
+    scope: grantedScope,
+  });
+  return new Response(
+    JSON.stringify({
+      identity_assertion: assertion,
+      token_type: "identity_assertion",
+      identity_type: identityType,
+      subject,
+      scope: grantedScope,
+      expires_in: TOKEN_TTL_SECONDS,
+      issuer: baseUrl,
+      // Per WorkOS auth.md: the assertion is replayable as a bearer at
+      // the same resource server. id-jag clients exchange it via /token
+      // with grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer.
+      replay_as_bearer: true,
+    }),
+    { headers: apiHeaders({ "Cache-Control": "no-store" }) }
+  );
+}
+
+// ─── /oauth/revoke (RFC 7009) ─────────────────────────────────────────────
+// Tokens are stateless JWS — there is no server-side session to invalidate.
+// RFC 7009 says a revocation request always returns 200 even for invalid
+// tokens, so we accept any token (or none) and acknowledge.
+async function handleRevoke({ request }) {
+  if (request.method !== "POST") {
+    return apiError({
+      status: 405,
+      code: "method_not_allowed",
+      message: "POST application/x-www-form-urlencoded only.",
+    });
+  }
+  // Drain the body so connection pooling works, but ignore contents —
+  // statelessness means there's nothing to look up.
+  await request.text().catch(() => "");
+  return new Response(null, {
+    status: 200,
+    headers: apiHeaders({ "Cache-Control": "no-store" }),
+  });
+}
+
 // ─── /oauth/userinfo ──────────────────────────────────────────────────────
 async function handleUserinfo({ request }) {
   // Extract bearer token if any — we don't validate, just echo subject.
@@ -426,6 +508,8 @@ function handleIndex({ baseUrl }) {
           authorize: `${baseUrl}/oauth/authorize`,
           token: `${baseUrl}/oauth/token`,
           register: `${baseUrl}/oauth/register`,
+          claim: `${baseUrl}/oauth/claim`,
+          revoke: `${baseUrl}/oauth/revoke`,
           userinfo: `${baseUrl}/oauth/userinfo`,
           jwks: `${baseUrl}/oauth/jwks.json`,
         },

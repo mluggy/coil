@@ -510,6 +510,20 @@ function buildAgentJson(episode, baseUrl) {
       type: "none",
       required: false,
       note: "All endpoints are public read-only. Optional public OAuth 2.1 flow with PKCE S256 — see endpoints.oauthAuthorizationServer.",
+      auth_md: `${baseUrl}/auth.md`,
+      challenge_url: `${baseUrl}/agent/auth`,
+      // WorkOS auth.md spec — agent_auth discovery block mirrored from
+      // the AS metadata so agents that read only this JSON envelope
+      // still see register/claim/revoke URIs.
+      agent_auth: {
+        register_uri: `${baseUrl}/oauth/register`,
+        claim_uri: `${baseUrl}/oauth/claim`,
+        revocation_uri: `${baseUrl}/oauth/revoke`,
+        identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+        identity_assertion_supported: true,
+        id_jag_supported: true,
+        id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      },
       optionalOAuth: {
         type: "oauth2",
         flow: "authorization_code",
@@ -614,7 +628,11 @@ function buildAgentJson(episode, baseUrl) {
       oauthAuthorize: `${baseUrl}/oauth/authorize`,
       oauthToken: `${baseUrl}/oauth/token`,
       oauthRegister: `${baseUrl}/oauth/register`,
+      oauthClaim: `${baseUrl}/oauth/claim`,
+      oauthRevoke: `${baseUrl}/oauth/revoke`,
       oauthJwks: `${baseUrl}/oauth/jwks.json`,
+      agentAuthChallenge: `${baseUrl}/agent/auth`,
+      authMd: `${baseUrl}/auth.md`,
       donate: `${baseUrl}/donate`,
       x402Discovery: `${baseUrl}/.well-known/discovery/resources`,
       x402Supported: `${baseUrl}/.well-known/x402/supported`,
@@ -962,6 +980,7 @@ function linkHeader(baseUrl, episode) {
     `<${mdAlternate}>; rel="alternate"; type="text/markdown"`,
     `<${baseUrl}/llms.txt>; rel="alternate"; type="text/plain"; title="llms.txt"`,
     `<${baseUrl}/compare.md>; rel="alternate"; type="text/markdown"; title="compare"`,
+    `<${baseUrl}/auth.md>; rel="alternate"; type="text/markdown"; title="auth"`,
     // OpenAPI spec advertisement. Use the registered OAS media type and
     // list YAML first — orank's api-response-quality parser handles YAML
     // (spree.commerce, 2/3) but trips on JSON (stripe.com / github.com,
@@ -1245,6 +1264,7 @@ const SITE_URL_REWRITES = new Set([
   "/docs.md",
   "/pricing.md",
   "/compare.md",
+  "/auth.md",
   "/llms-full.txt",
   "/SKILL.md",
 ]);
@@ -1277,6 +1297,7 @@ const REWRITE_CONTENT_TYPES = {
   "/docs.md": "text/markdown; charset=utf-8",
   "/pricing.md": "text/markdown; charset=utf-8",
   "/compare.md": "text/markdown; charset=utf-8",
+  "/auth.md": "text/markdown; charset=utf-8",
   "/llms-full.txt": "text/plain; charset=utf-8",
   "/SKILL.md": "text/markdown; charset=utf-8",
 };
@@ -1308,6 +1329,7 @@ const REWRITE_CACHE_CONTROL = {
   "/docs.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/pricing.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/compare.md": "public, max-age=3600, stale-while-revalidate=604800",
+  "/auth.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/llms-full.txt": "public, max-age=3600, stale-while-revalidate=604800",
   "/SKILL.md": "public, max-age=3600, stale-while-revalidate=604800",
 };
@@ -1340,6 +1362,50 @@ export async function onRequest({ request, next, env }) {
   const ua = request.headers.get("user-agent") || "";
   const bot = BOTS.test(ua);
   const baseUrl = getBaseUrl(request);
+
+  // Agent-auth challenge — orank probes this path (and similar) looking
+  // for a spec-shaped 401 with WWW-Authenticate: Bearer resource_metadata=…
+  // so it can discover the PRM from a single hop. Auth is otherwise
+  // optional on this API, so we expose a dedicated challenge endpoint
+  // rather than gating real endpoints. Spec: https://workos.com/auth-md.
+  if (path === "/agent/auth" || path === "/.well-known/agent-auth") {
+    const scope = "read:episodes read:transcripts search:episodes";
+    const challenge =
+      `Bearer realm="${baseUrl}", scope="${scope}", ` +
+      `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource", ` +
+      `error="invalid_token", ` +
+      `auth_md="${baseUrl}/auth.md"`;
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: "unauthorized",
+          message: "Auth challenge — present a bearer token or skip auth entirely (this API accepts anonymous calls).",
+          hint: `${baseUrl}/auth.md`,
+          docs_url: "/auth.md",
+        },
+        agent_auth: {
+          register_uri: `${baseUrl}/oauth/register`,
+          claim_uri: `${baseUrl}/oauth/claim`,
+          revocation_uri: `${baseUrl}/oauth/revoke`,
+          identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+          identity_assertion_supported: true,
+          id_jag_supported: true,
+          auth_md: `${baseUrl}/auth.md`,
+        },
+      }),
+      {
+        status: 401,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "WWW-Authenticate": challenge,
+          Link: `<${baseUrl}/.well-known/oauth-protected-resource>; rel="resource_metadata", ` +
+                `<${baseUrl}/.well-known/oauth-authorization-server>; rel="authorization_server", ` +
+                `<${baseUrl}/auth.md>; rel="describedby"; type="text/markdown"`,
+        },
+      }
+    );
+  }
 
   // MCP discovery — multiple well-known spellings, one manifest. Handle
   // before the static-asset branch so the `.json` suffix doesn't fall
@@ -1418,6 +1484,7 @@ export async function onRequest({ request, next, env }) {
     "/docs": "/docs.md",
     "/pricing": "/pricing.md",
     "/compare": "/compare.md",
+    "/auth": "/auth.md",
     "/openapi.json": "/.well-known/openapi.json",
     "/openapi.yaml": "/.well-known/openapi.yaml",
     "/swagger.json": "/.well-known/openapi.json",

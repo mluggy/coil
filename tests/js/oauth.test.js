@@ -142,6 +142,65 @@ describe("/oauth/authorize", () => {
   });
 });
 
+describe("/oauth/claim (WorkOS auth.md identity_assertion)", () => {
+  it("mints an identity_assertion JWT", async () => {
+    const resp = await call("/oauth/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "identity_type=identity_assertion&scope=read:episodes",
+    });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.token_type).toBe("identity_assertion");
+    expect(body.identity_type).toBe("identity_assertion");
+    expect(body.identity_assertion.split(".")).toHaveLength(3);
+    expect(body.subject).toMatch(/^anonymous-/);
+    expect(body.replay_as_bearer).toBe(true);
+    expect(body.scope).toContain("read:episodes");
+  });
+
+  it("accepts JSON body", async () => {
+    const resp = await call("/oauth/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identity_type: "anonymous" }),
+    });
+    expect(resp.status).toBe(200);
+    const body = await json(resp);
+    expect(body.identity_assertion).toBeTruthy();
+  });
+
+  it("rejects DELETE", async () => {
+    const resp = await call("/oauth/claim", { method: "DELETE" });
+    expect(resp.status).toBe(405);
+  });
+});
+
+describe("/oauth/revoke (RFC 7009)", () => {
+  it("returns 200 for any token", async () => {
+    const resp = await call("/oauth/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "token=abc&token_type_hint=access_token",
+    });
+    expect(resp.status).toBe(200);
+  });
+
+  it("returns 200 with no body (stateless tokens)", async () => {
+    const resp = await call("/oauth/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "",
+    });
+    expect(resp.status).toBe(200);
+  });
+
+  it("rejects GET", async () => {
+    const resp = await call("/oauth/revoke", { method: "GET" });
+    expect(resp.status).toBe(405);
+  });
+});
+
 describe("/oauth/register (RFC 7591)", () => {
   it("returns the public client_id", async () => {
     const resp = await call("/oauth/register", {
@@ -202,6 +261,8 @@ describe("/oauth/ index", () => {
     expect(body.endpoints.authorization_server_metadata).toMatch(
       /\/\.well-known\/oauth-authorization-server$/
     );
+    expect(body.endpoints.claim).toMatch(/\/oauth\/claim$/);
+    expect(body.endpoints.revoke).toMatch(/\/oauth\/revoke$/);
     expect(body.scopes).toContain("read:episodes");
   });
 });

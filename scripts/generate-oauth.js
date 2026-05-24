@@ -19,20 +19,62 @@ mkdirSync("public/.well-known", { recursive: true });
 const SCOPES = ["read:episodes", "read:transcripts", "search:episodes"];
 
 // ─── /.well-known/oauth-authorization-server (RFC 8414) ──────────────────
+// WorkOS auth.md adds the `agent_auth` block — register_uri, claim_uri,
+// revocation_uri, identity_types_supported, identity_assertion. Orank's
+// agent-auth-discovery probe wants this present in the AS metadata; the
+// PRM cross-links by listing this issuer in `authorization_servers`.
+const agentAuth = {
+  // Spec anchors — register_uri / claim_uri / revocation_uri are the
+  // three endpoints an agent walks to obtain, exchange, and discard
+  // credentials. All three resolve (no 404).
+  register_uri: `${SITE}/oauth/register`,
+  claim_uri: `${SITE}/oauth/claim`,
+  revocation_uri: `${SITE}/oauth/revoke`,
+  // identity_types_supported per WorkOS auth.md: which assertion types
+  // the AS will mint at /claim. "anonymous" + "client_credentials" cover
+  // the zero-auth and M2M paths; "identity_assertion" surfaces the
+  // id-jag-style replayable assertion.
+  identity_types_supported: [
+    "anonymous",
+    "client_credentials",
+    "identity_assertion",
+  ],
+  identity_assertion_supported: true,
+  identity_assertion_signing_alg_values_supported: ["EdDSA", "HS256"],
+  // id-jag (Identity Assertion Grant) — the JWT-bearer grant clients use
+  // to exchange the /claim assertion for a vanilla bearer at /token.
+  id_jag_supported: true,
+  id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+  // Prose walkthrough lives at /auth.md.
+  auth_md: `${SITE}/auth.md`,
+  documentation: `${SITE}/auth.md`,
+  www_authenticate_challenge: `${SITE}/agent/auth`,
+};
+
 const authServer = {
   issuer: SITE,
   authorization_endpoint: `${SITE}/oauth/authorize`,
   token_endpoint: `${SITE}/oauth/token`,
   registration_endpoint: `${SITE}/oauth/register`,
+  revocation_endpoint: `${SITE}/oauth/revoke`,
+  revocation_endpoint_auth_methods_supported: ["none"],
   jwks_uri: `${SITE}/oauth/jwks.json`,
   scopes_supported: SCOPES,
   response_types_supported: ["code"],
   response_modes_supported: ["query"],
-  grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+  grant_types_supported: [
+    "authorization_code",
+    "client_credentials",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:jwt-bearer",
+  ],
   token_endpoint_auth_methods_supported: ["none"],
   code_challenge_methods_supported: ["S256"],
   service_documentation: `${SITE}/docs.md`,
   ui_locales_supported: ["en"],
+  // WorkOS auth.md — agent_auth discovery block. Orank probes for this
+  // exact key in AS metadata.
+  agent_auth: agentAuth,
   // Public client — no client secret, no consent screen. Anonymous-by-design.
   // Advertise this clearly so agents don't try to find a registration UI.
   "x-public-client": {
@@ -49,15 +91,29 @@ writeFileSync(
 console.log("Generated public/.well-known/oauth-authorization-server");
 
 // ─── /.well-known/oauth-protected-resource (RFC 9728) ─────────────────────
+// Orank's agent-auth-discovery probe cross-checks the AS by following
+// `authorization_servers`. Listing the issuer (same origin in our case)
+// and mirroring the agent_auth block satisfies both halves of the probe.
 const protectedResource = {
   resource: SITE,
   authorization_servers: [SITE],
+  // Explicit pointer to the AS metadata URL — some PRM parsers walk
+  // this rather than appending /.well-known/oauth-authorization-server
+  // to each entry in `authorization_servers`.
+  authorization_server_metadata: `${SITE}/.well-known/oauth-authorization-server`,
   scopes_supported: SCOPES,
   bearer_methods_supported: ["header"],
   resource_documentation: `${SITE}/docs.md`,
   // EdDSA when SIGNING_PRIVATE_KEY is set, HS256 fallback otherwise.
   // Both are JWS-compatible; clients verify against /oauth/jwks.json.
   resource_signing_alg_values_supported: ["EdDSA", "HS256"],
+  // WorkOS auth.md — agent_auth block mirrored from the AS so agents
+  // that only fetch the PRM still see register/claim/revoke URIs.
+  agent_auth: agentAuth,
+  // WWW-Authenticate hint surface — clients that want a live 401 with
+  // the resource_metadata link can probe /agent/auth.
+  www_authenticate_challenge: `${SITE}/agent/auth`,
+  auth_md: `${SITE}/auth.md`,
   // Auth optional — declare so agents know the resource is reachable
   // without a token. Non-standard but commonly used by OpenAPI tools.
   "x-auth-required": false,
@@ -79,6 +135,7 @@ const oidc = {
   authorization_endpoint: `${SITE}/oauth/authorize`,
   token_endpoint: `${SITE}/oauth/token`,
   userinfo_endpoint: `${SITE}/oauth/userinfo`,
+  revocation_endpoint: `${SITE}/oauth/revoke`,
   jwks_uri: `${SITE}/oauth/jwks.json`,
   registration_endpoint: `${SITE}/oauth/register`,
   scopes_supported: ["openid", ...SCOPES],
@@ -86,10 +143,18 @@ const oidc = {
   subject_types_supported: ["public"],
   id_token_signing_alg_values_supported: ["EdDSA", "HS256"],
   token_endpoint_auth_methods_supported: ["none"],
-  grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+  grant_types_supported: [
+    "authorization_code",
+    "client_credentials",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:jwt-bearer",
+  ],
   code_challenge_methods_supported: ["S256"],
   claims_supported: ["sub", "iss", "aud", "iat", "exp", "scope"],
   service_documentation: `${SITE}/docs.md`,
+  // Mirror agent_auth for OIDC-first agents that don't fetch RFC 8414
+  // metadata separately.
+  agent_auth: agentAuth,
 };
 
 writeFileSync(

@@ -3,10 +3,10 @@
 // (X-RateLimit-*, structured error envelope) and response shapes.
 
 import { describe, it, expect } from "vitest";
-import { onRequestGet as searchGet, onRequestPost as searchPost } from "../../functions/api/search.js";
+import { onRequestGet as searchGet, onRequestPost as searchPost, onRequestHead as searchHead } from "../../functions/api/search.js";
 import { onRequestGet as askGet, onRequestPost as askPost } from "../../functions/ask.js";
-import { onRequestGet as statusGet } from "../../functions/status.js";
-import { onRequestGet as catchallGet, onRequestOptions as catchallOptions } from "../../functions/api/[[catchall]].js";
+import { onRequestGet as statusGet, onRequestHead as statusHead } from "../../functions/status.js";
+import { onRequestGet as catchallGet, onRequestOptions as catchallOptions, onRequestHead as catchallHead } from "../../functions/api/[[catchall]].js";
 
 const BASE = "https://example.test";
 
@@ -24,7 +24,20 @@ describe("/api/search", () => {
     expect(resp.headers.get("X-RateLimit-Limit")).toBeTruthy();
     expect(resp.headers.get("X-RateLimit-Remaining")).toBeTruthy();
     expect(resp.headers.get("X-RateLimit-Reset")).toBeTruthy();
+    // RFC 9598 canonical names too (orank probes for these specifically).
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("RateLimit-Remaining")).toBeTruthy();
+    expect(resp.headers.get("RateLimit-Reset")).toBeTruthy();
     expect(resp.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  it("HEAD returns the same rate-limit headers as GET, no body", async () => {
+    const resp = await searchHead({ request: req("/api/search?q=test", { method: "HEAD" }) });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("X-RateLimit-Remaining")).toBeTruthy();
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+    expect(await resp.text()).toBe("");
   });
 
   it("returns a structured success envelope", async () => {
@@ -48,6 +61,22 @@ describe("/api/search", () => {
   it("rejects POST with 405", async () => {
     const resp = await searchPost({ request: req("/api/search?q=x", { method: "POST" }) });
     expect(resp.status).toBe(405);
+  });
+});
+
+describe("HEAD probes on /api/* + /status (RFC 9598 rate-limit probe)", () => {
+  it("HEAD /status returns rate-limit headers", async () => {
+    const resp = await statusHead({ request: req("/status", { method: "HEAD" }) });
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("X-RateLimit-Reset")).toBeTruthy();
+    expect(await resp.text()).toBe("");
+  });
+
+  it("HEAD on a 404 catchall path still carries rate-limit headers", async () => {
+    const resp = await catchallHead({ request: req("/api/nope", { method: "HEAD" }) });
+    expect(resp.status).toBe(404);
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("X-RateLimit-Limit")).toBeTruthy();
   });
 });
 

@@ -120,4 +120,11 @@ export const onRequestPut = reject;
 export const onRequestDelete = reject;
 export const onRequestPatch = reject;
 
+// HEAD probes (orank's RFC 9598 probe sends HEAD) must return the same
+// headers as GET — including the rate-limit headers — minus the body.
+export async function onRequestHead(ctx) {
+  const resp = await onRequestGet(ctx);
+  return new Response(null, { status: resp.status, headers: resp.headers });
+}
+
 export const onRequestOptions = corsPreflight;

@@ -174,3 +174,8 @@ export const onRequestPut = dispatch;
 export const onRequestDelete = dispatch;
 export const onRequestPatch = dispatch;
 export const onRequestOptions = corsPreflight;
+// HEAD must carry the same headers (incl. RFC 9598 rate-limit) as GET.
+export async function onRequestHead(ctx) {
+  const resp = await dispatch(ctx);
+  return new Response(null, { status: resp.status, headers: resp.headers });
+}

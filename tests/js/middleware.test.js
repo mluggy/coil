@@ -402,6 +402,50 @@ describe("Link header — auth.md alternate", () => {
   });
 });
 
+describe("RFC 9598 rate-limit headers on every /api/* response", () => {
+  it("GET /api returns a JSON index with rate-limit headers", async () => {
+    const resp = await call("/api");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("X-RateLimit-Remaining")).toBeTruthy();
+    const body = JSON.parse(await resp.text());
+    expect(body.endpoints.search).toMatch(/\/api\/search/);
+  });
+
+  it("HEAD /api returns the same rate-limit headers, empty body", async () => {
+    const resp = await call("/api", { method: "HEAD" });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(await resp.text()).toBe("");
+  });
+
+  it("middleware backfills rate-limit headers when downstream forgot them", async () => {
+    // Simulate a downstream Pages function returning a bare response —
+    // the /api/* passthrough must inject rate-limit headers before
+    // returning to the client.
+    const bareNext = () =>
+      Promise.resolve(
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    const resp = await onRequest({
+      request: makeReq("/api/something"),
+      next: bareNext,
+      env,
+    });
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(resp.headers.get("X-RateLimit-Reset")).toBeTruthy();
+  });
+
+  it("/api/llms.txt rewrite carries rate-limit headers", async () => {
+    const resp = await call("/api/llms.txt");
+    expect(resp.headers.get("RateLimit-Limit")).toBeTruthy();
+  });
+});
+
 describe("legacy redirects", () => {
   it("/subscribe → 301 to /", async () => {
     const resp = await call("/subscribe");

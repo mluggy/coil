@@ -475,3 +475,10 @@ export const onRequestDelete = reject;
 export const onRequestPatch = reject;
 
 export const onRequestOptions = corsPreflight;
+
+// HEAD probes return the same headers as GET — including rate-limit
+// headers and the WWW-Authenticate challenge — minus the body.
+export async function onRequestHead(ctx) {
+  const resp = await onRequestGet(ctx);
+  return new Response(null, { status: resp.status, headers: resp.headers });
+}

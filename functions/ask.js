@@ -142,3 +142,10 @@ export const onRequestDelete = reject;
 export const onRequestPatch = reject;
 
 export const onRequestOptions = corsPreflight;
+
+// HEAD probes (orank's RFC 9598 probe) return the same headers as GET —
+// including rate-limit headers — minus the body.
+export async function onRequestHead({ request }) {
+  const resp = await handleAsk(request);
+  return new Response(null, { status: resp.status, headers: resp.headers });
+}

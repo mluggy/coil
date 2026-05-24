@@ -23,7 +23,11 @@ export const ERROR_DOCS_URL = "/api/llms.txt";
 // prior version kept alive per the deprecation policy in the OpenAPI spec.
 export const API_VERSION = "2026-05-18";
 
-function rateLimitHeaders() {
+// Exported so middleware can attach RFC 9598 rate-limit headers to
+// responses it builds itself (static rewrites under /api/, HEAD probes,
+// the /api catch-all). Without these, orank's RFC 9598 probe sees
+// "no rate-limit headers found on API endpoints".
+export function rateLimitHeaders() {
   // We don't track per-IP usage in code; `Remaining` mirrors the limit
   // because we never deny. Cloudflare edge rate-limit rules (configured
   // in the dashboard) are the actual enforcement layer.

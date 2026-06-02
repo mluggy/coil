@@ -96,7 +96,6 @@ export function deriveConfig(raw) {
       ? {
           ...raw.host,
           linkedin_url: raw.host.linkedin_url || "",
-          works_for: raw.host.works_for || "",
           credentials: Array.isArray(raw.host.credentials) ? raw.host.credentials : [],
           knows_about: Array.isArray(raw.host.knows_about) ? raw.host.knows_about : [],
         }

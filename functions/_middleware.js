@@ -252,7 +252,6 @@ function buildJsonLd(episode, baseUrl) {
     name: config.author,
     ...(config.host?.job_title ? { jobTitle: config.host.job_title } : {}),
     ...(config.host?.bio ? { description: config.host.bio } : {}),
-    ...(config.host?.works_for ? { worksFor: { "@type": "Organization", name: config.host.works_for } } : {}),
     ...(hostCredentials.length ? { hasCredential: hostCredentials } : {}),
     ...(hostKnowsAbout.length ? { knowsAbout: hostKnowsAbout } : {}),
     ...(personSameAs.length ? { sameAs: personSameAs } : {}),
@@ -418,7 +417,7 @@ function buildJsonLd(episode, baseUrl) {
                 author: {
                   "@type": "Person",
                   name: t.author,
-                  ...(t.org ? { worksFor: { "@type": "Organization", name: t.org } } : {}),
+                  ...(t.org ? { affiliation: { "@type": "Organization", name: t.org } } : {}),
                   ...(t.url ? { url: t.url } : {}),
                 },
               }

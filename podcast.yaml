@@ -152,9 +152,6 @@ host:
   wikipedia_url: ""    # e.g. "https://en.wikipedia.org/wiki/Your_Name"
   github_url: ""       # e.g. "https://github.com/yourhandle"
   linkedin_url: ""     # e.g. "https://www.linkedin.com/in/yourhandle/" — host's personal profile (separate from show-level linkedin_url)
-  # Employer / current affiliation. Emitted as Person.worksFor
-  # (Organization) in JSON-LD and shown on /about. Leave empty to omit.
-  works_for: ""        # e.g. "Acme Corp"
   # Credentials / background bullets that establish expertise. Each becomes
   # a Person.hasCredential (EducationalOccupationalCredential) entry in
   # JSON-LD and a bullet on /about. Directly addresses orank's

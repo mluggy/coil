@@ -442,10 +442,6 @@ if (config.author) {
     about.push(host.bio);
     about.push("");
   }
-  if (host.works_for) {
-    about.push(`Currently at **${host.works_for}**.`);
-    about.push("");
-  }
   const credentials = Array.isArray(host.credentials) ? host.credentials : [];
   if (credentials.length) {
     about.push("### Background & credentials");

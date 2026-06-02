@@ -94,21 +94,34 @@ doc.push(`# 4. (Optional shortcut) Fetch the templates directly from the registr
 doc.push(`curl ${SITE}/oauth/register | jq '.templates[]'`);
 doc.push("```");
 doc.push("");
-doc.push("The `agent_auth.registration_templates` array advertises three identity types — `anonymous`, `client_credentials`, and `identity_assertion`. The `user-email-app` template (`identity_type: identity_assertion`) is the one to pick when you only have the user's email; its `request_body_template` shows exactly which fields to fill in before the eventual POST.");
+doc.push("`agent_auth.identity_types_supported` lists the two spec identity types — `anonymous` and `identity_assertion` — and each has a sibling block describing the exact request shape, so you never have to guess what to send:");
+doc.push("");
+doc.push("```jsonc");
+doc.push('"identity_types_supported": ["anonymous", "identity_assertion"],');
+doc.push('"anonymous": {');
+doc.push('  "credential_types_supported": ["access_token", "api_key"]');
+doc.push('},');
+doc.push('"identity_assertion": {');
+doc.push('  "assertion_types_supported": ["urn:ietf:params:oauth:token-type:id-jag", "verified_email"],');
+doc.push('  "credential_types_supported": ["access_token", "api_key"]');
+doc.push('}');
+doc.push("```");
+doc.push("");
+doc.push("With **only the user's email**, pick `identity_assertion` with assertion type `verified_email`: select the `user-email-app` registration template (`identity_type: identity_assertion`) — its `request_body_template` shows exactly which fields to fill in before the eventual POST. (`client_credentials` is an OAuth *grant* for the `anonymous` identity, advertised under `grant_types_supported`, not an identity type.)");
 doc.push("");
 
 // ─── Pick a method ────────────────────────────────────────────────────────
 doc.push("## Pick a method");
 doc.push("");
-doc.push("Three identity flavors are advertised under `agent_auth.identity_types_supported`. Pick the one that fits your agent:");
+doc.push("Two identity types are advertised under `agent_auth.identity_types_supported`. Pick the one that fits your agent — and, for M2M, the grant you use to obtain the `anonymous` credential:");
 doc.push("");
-doc.push("| identity_type | When to use | Endpoint |");
-doc.push("| --- | --- | --- |");
-doc.push("| `anonymous` | You only need to read. No auth header required at all. | (no call needed) |");
-doc.push(`| \`client_credentials\` | You want a per-request bearer for audit logs or quotas. | \`POST ${SITE}/oauth/token\` with \`grant_type=client_credentials\` |`);
-doc.push(`| \`identity_assertion\` | You need an id-jag-style replayable assertion bound to a subject. | \`POST ${SITE}/oauth/claim\` |`);
+doc.push("| identity_type | Credential / grant | When to use | Endpoint |");
+doc.push("| --- | --- | --- | --- |");
+doc.push("| `anonymous` | `access_token` (no header at all) | You only need to read. | (no call needed) |");
+doc.push(`| \`anonymous\` | \`access_token\` via \`client_credentials\` grant (M2M) | You want a per-request bearer for audit logs or quotas. | \`POST ${SITE}/oauth/token\` with \`grant_type=client_credentials\` |`);
+doc.push(`| \`identity_assertion\` | \`urn:ietf:params:oauth:token-type:id-jag\` or \`verified_email\` | You need an id-jag-style replayable assertion bound to a subject (e.g. the user's email). | \`POST ${SITE}/oauth/claim\` |`);
 doc.push("");
-doc.push("All three live on the same public client (`client_id=public`, no client secret, PKCE S256 supported). No tier is rate-limited differently — the choice is about credential shape, not access level.");
+doc.push("All of these live on the same public client (`client_id=public`, no client secret, PKCE S256 supported). No tier is rate-limited differently — the choice is about credential shape, not access level.");
 doc.push("");
 
 // ─── Register ─────────────────────────────────────────────────────────────
@@ -150,7 +163,7 @@ doc.push("| id | identity_type | When to pick |");
 doc.push("| --- | --- | --- |");
 doc.push("| `anonymous-public-client` | `anonymous` | Agent has no user identity — wants a zero-friction read client. |");
 doc.push("| `user-email-app` | `identity_assertion` | Agent has the user's email and needs an identity_assertion bound to it. |");
-doc.push("| `service-account` | `client_credentials` | Non-interactive backend agent (M2M). |");
+doc.push("| `service-account` | `anonymous` (via `client_credentials` grant) | Non-interactive backend agent (M2M). |");
 doc.push("");
 
 // ─── Claim ────────────────────────────────────────────────────────────────

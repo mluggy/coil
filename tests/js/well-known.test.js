@@ -71,18 +71,24 @@ describe(".well-known/oauth-authorization-server (RFC 8414)", () => {
     expect(m.agent_auth.register_uri).toBe(`${SITE}/oauth/register`);
     expect(m.agent_auth.claim_uri).toBe(`${SITE}/oauth/claim`);
     expect(m.agent_auth.revocation_uri).toBe(`${SITE}/oauth/revoke`);
+    // Spec enum only (anonymous, identity_assertion); client_credentials is
+    // a grant and lives in grant_types_supported, not here.
     expect(m.agent_auth.identity_types_supported).toEqual(
-      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+      ["anonymous", "identity_assertion"]
     );
+    // Per-type request-shape sibling blocks (WorkOS auth.md).
+    expect(m.agent_auth.anonymous.credential_types_supported).toContain("api_key");
+    expect(m.agent_auth.identity_assertion.assertion_types_supported).toEqual(
+      expect.arrayContaining(["urn:ietf:params:oauth:token-type:id-jag", "verified_email"])
+    );
+    expect(m.agent_auth.identity_assertion.credential_types_supported).toContain("access_token");
     expect(m.agent_auth.identity_assertion_supported).toBe(true);
     expect(m.agent_auth.id_jag_supported).toBe(true);
     expect(m.agent_auth.auth_md).toBe(`${SITE}/auth.md`);
   });
 
-  it("agent_auth.skill back-points at the use-agent-auth SKILL.md", () => {
-    expect(m.agent_auth.skill).toBe(
-      `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`
-    );
+  it("agent_auth.skill round-trips back to /auth.md (spec)", () => {
+    expect(m.agent_auth.skill).toBe(`${SITE}/auth.md`);
     expect(Array.isArray(m.agent_auth.skills)).toBe(true);
     expect(m.agent_auth.skills[0].name).toBe("use-agent-auth");
   });
@@ -166,10 +172,8 @@ describe(".well-known/oauth-protected-resource (RFC 9728)", () => {
     expect(m.auth_md).toBe(`${SITE}/auth.md`);
   });
 
-  it("PRM agent_auth carries the same skill back-pointer as AS", () => {
-    expect(m.agent_auth.skill).toBe(
-      `${SITE}/.well-known/agent-skills/use-agent-auth/SKILL.md`
-    );
+  it("PRM agent_auth carries the same skill back-pointer as AS (/auth.md)", () => {
+    expect(m.agent_auth.skill).toBe(`${SITE}/auth.md`);
   });
 });
 

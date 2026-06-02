@@ -86,7 +86,7 @@ describe("homepage HTML", () => {
 describe("homepage ?mode=agent", () => {
   let body;
   beforeAll(async () => {
-    const resp = await call("/?mode=agent");
+    const resp = await call("/?mode=agent", { headers: { Accept: "application/json" } });
     body = JSON.parse(await resp.text());
   });
 
@@ -94,6 +94,27 @@ describe("homepage ?mode=agent", () => {
     expect(body.mode).toBe("agent");
     expect(body.schemaVersion).toMatch(/^1\./);
     expect(body.contentType).toBe("podcast");
+  });
+
+  it("defaults to an HTML briefing (forter-style) with embedded JSON", async () => {
+    const resp = await call("/?mode=agent");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/html/);
+    const html = await resp.text();
+    expect(html).toMatch(/^<!doctype html>/i);
+    expect(html).toMatch(/When to use/i);
+    expect(html).toMatch(/Webhooks/i);
+    // Embedded machine-readable briefing.
+    expect(html).toMatch(/<script type="application\/json" id="agent-briefing">/);
+    const m = html.match(/<script type="application\/json" id="agent-briefing">([\s\S]*?)<\/script>/);
+    const embedded = JSON.parse(m[1].replace(/\\u003c/g, "<"));
+    expect(embedded.mode).toBe("agent");
+  });
+
+  it("webhooks block advertises supported=true + endpoint", () => {
+    expect(body.webhooks.supported).toBe(true);
+    expect(body.webhooks.endpoint).toMatch(/\/webhooks$/);
+    expect(body.webhooks.events).toContain("episode.published");
   });
 
   it("includes auth.optionalOAuth metadata block", () => {
@@ -142,6 +163,85 @@ describe("homepage Accept: text/markdown", () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
     expect(resp.headers.get("Vary") || "").toMatch(/Accept/);
+  });
+});
+
+describe("/webhooks (event subscriptions)", () => {
+  it("GET returns the event catalog + payload schema", async () => {
+    const resp = await call("/webhooks");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/application\/json/);
+    const body = JSON.parse(await resp.text());
+    expect(body.events_supported).toContain("episode.published");
+    expect(body.registration_endpoint).toMatch(/\/webhooks$/);
+    expect(body.transports.websub.hub).toMatch(/\/webhooks$/);
+    expect(body.payload_schema).toBeTruthy();
+    expect(body.example_payload.type).toBe("episode.published");
+  });
+
+  it("POST (JSON) registers a subscription → 201 + Location", async () => {
+    const resp = await call("/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://app.example/hook", events: ["episode.published"], secret: "s3cret" }),
+    });
+    expect(resp.status).toBe(201);
+    expect(resp.headers.get("Location")).toMatch(/\/webhooks\//);
+    const body = JSON.parse(await resp.text());
+    expect(body.status).toBe("active");
+    expect(body.callback).toBe("https://app.example/hook");
+    // round-trip: GET the subscription
+    const id = body.id;
+    const got = await call(`/webhooks/${id}`);
+    expect(got.status).toBe(200);
+    const sub = JSON.parse(await got.text());
+    expect(sub.callback).toBe("https://app.example/hook");
+    // unsubscribe
+    const del = await call(`/webhooks/${id}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    expect(JSON.parse(await del.text()).status).toBe("unsubscribed");
+  });
+
+  it("POST (WebSub form) accepts a hub subscription → 202", async () => {
+    const resp = await call("/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "hub.mode=subscribe&hub.topic=https://example.test/rss.xml&hub.callback=https://app.example/hook",
+    });
+    expect(resp.status).toBe(202);
+    expect(resp.headers.get("Location")).toMatch(/\/webhooks\//);
+  });
+
+  it("POST without a callback URL → 400", async () => {
+    const resp = await call("/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events: ["episode.published"] }),
+    });
+    expect(resp.status).toBe(400);
+    expect(JSON.parse(await resp.text()).error.code).toBe("missing_callback");
+  });
+
+  it("advertises a WebSub hub in the homepage Link header", async () => {
+    const resp = await call("/");
+    expect(resp.headers.get("Link") || "").toMatch(/\/webhooks>;\s*rel="hub"/);
+  });
+});
+
+describe("universal .md twins", () => {
+  it("serves a markdown twin for a well-known doc (content page + .md)", async () => {
+    const resp = await call("/.well-known/oauth-authorization-server.md");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
+    const body = await resp.text();
+    // heading-led, never HTML
+    expect(body.trimStart().startsWith("#")).toBe(true);
+  });
+
+  it("/about alias serves about.md as markdown", async () => {
+    const resp = await call("/about");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
   });
 });
 
@@ -353,9 +453,18 @@ describe("/agent/auth (WorkOS auth.md WWW-Authenticate challenge)", () => {
     expect(body.agent_auth.register_uri).toMatch(/\/oauth\/register$/);
     expect(body.agent_auth.claim_uri).toMatch(/\/oauth\/claim$/);
     expect(body.agent_auth.revocation_uri).toMatch(/\/oauth\/revoke$/);
+    // Spec enum only — anonymous + identity_assertion (client_credentials is
+    // a grant, not an identity type).
     expect(body.agent_auth.identity_types_supported).toEqual(
-      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+      ["anonymous", "identity_assertion"]
     );
+    // Per-type request-shape sibling blocks.
+    expect(body.agent_auth.anonymous.credential_types_supported).toContain("api_key");
+    expect(body.agent_auth.identity_assertion.assertion_types_supported).toContain(
+      "urn:ietf:params:oauth:token-type:id-jag"
+    );
+    expect(body.agent_auth.identity_assertion.credential_types_supported).toContain("access_token");
+    expect(body.agent_auth.skill).toMatch(/\/auth\.md$/);
   });
 
   it("/.well-known/agent-auth alias works the same way", async () => {
@@ -368,7 +477,7 @@ describe("/agent/auth (WorkOS auth.md WWW-Authenticate challenge)", () => {
 describe("homepage ?mode=agent — auth.md surface", () => {
   let body;
   beforeAll(async () => {
-    const resp = await call("/?mode=agent");
+    const resp = await call("/?mode=agent", { headers: { Accept: "application/json" } });
     body = JSON.parse(await resp.text());
   });
 
@@ -497,7 +606,7 @@ describe("RFC 9598 rate-limit headers on every /api/* response", () => {
 describe("agent-mode envelope advertises 202 async pattern + /jobs endpoint", () => {
   let body;
   beforeAll(async () => {
-    const resp = await call("/?mode=agent");
+    const resp = await call("/?mode=agent", { headers: { Accept: "application/json" } });
     body = JSON.parse(await resp.text());
   });
 

@@ -13,6 +13,7 @@ const urls = [
   // discovery scanners (orank, search engines, etc.) can find the
   // machine-readable surface without probing well-known paths.
   { loc: `${SITE}/docs`, lastmod: "", priority: "0.6" },
+  { loc: `${SITE}/about`, lastmod: "", priority: "0.6" },
   { loc: `${SITE}/pricing`, lastmod: "", priority: "0.6" },
   { loc: `${SITE}/auth.md`, lastmod: "", priority: "0.6" },
   { loc: `${SITE}/llms.txt`, lastmod: "", priority: "0.5" },

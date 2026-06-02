@@ -240,7 +240,7 @@ describe("/oauth/register (RFC 7591)", () => {
       expect.arrayContaining(["GET", "POST"])
     );
     expect(body.identity_types_supported).toEqual(
-      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+      ["anonymous", "identity_assertion"]
     );
     const ids = body.templates.map((t) => t.id);
     expect(ids).toEqual(
@@ -257,7 +257,7 @@ describe("/oauth/register (RFC 7591)", () => {
     expect(email.required_fields).toContain("user_email");
     expect(email.request_body_template.user_email).toBe("{{user_email}}");
     expect(body.auth_md).toMatch(/\/auth\.md$/);
-    expect(body.skill).toMatch(/use-agent-auth\/SKILL\.md$/);
+    expect(body.skill).toMatch(/\/auth\.md$/);
   });
 });
 

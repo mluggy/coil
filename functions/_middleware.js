@@ -5,6 +5,7 @@ import { apiHeaders, errors, rateLimitHeaders } from "./_api.js";
 import { handleMcpPost, buildMcpGetManifest, mcpCsp, TOOLS as MCP_TOOLS, SERVER_INFO as MCP_SERVER_INFO, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION } from "./mcp.js";
 import { buildUiHttpResponse } from "./_mcp_apps.js";
 import * as commerce from "./_commerce.js";
+import * as webhooks from "./_webhooks.js";
 
 const BOTS = /googlebot|google-inspectiontool|bingbot|yandex|baiduspider|twitterbot|facebookexternalhit|linkedinbot|slackbot-linkexpanding|discordbot|whatsapp|telegrambot|applebot|pinterestbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|anthropic-ai|claudebot|ccbot/i;
 
@@ -230,12 +231,30 @@ function buildJsonLd(episode, baseUrl) {
   ].filter(Boolean);
   const wikidataId = config.host?.wikidata_id;
   if (wikidataId) personSameAs.unshift(`https://www.wikidata.org/wiki/${wikidataId}`);
+
+  // Host credentials → schema.org `hasCredential` (EducationalOccupationalCredential).
+  // Each is a background/expertise statement that establishes authority —
+  // directly feeds orank's "author credentials" E-E-A-T signal.
+  const hostCredentials = (Array.isArray(config.host?.credentials) ? config.host.credentials : [])
+    .map((c) => {
+      const name = typeof c === "string" ? c : c?.name;
+      if (!name) return null;
+      const cred = { "@type": "EducationalOccupationalCredential", name };
+      if (typeof c === "object" && c.url) cred.url = c.url;
+      return cred;
+    })
+    .filter(Boolean);
+  const hostKnowsAbout = (Array.isArray(config.host?.knows_about) ? config.host.knows_about : []).filter(Boolean);
+
   const person = {
     "@type": "Person",
     "@id": `${baseUrl}/#author`,
     name: config.author,
     ...(config.host?.job_title ? { jobTitle: config.host.job_title } : {}),
     ...(config.host?.bio ? { description: config.host.bio } : {}),
+    ...(config.host?.works_for ? { worksFor: { "@type": "Organization", name: config.host.works_for } } : {}),
+    ...(hostCredentials.length ? { hasCredential: hostCredentials } : {}),
+    ...(hostKnowsAbout.length ? { knowsAbout: hostKnowsAbout } : {}),
     ...(personSameAs.length ? { sameAs: personSameAs } : {}),
   };
 
@@ -313,14 +332,110 @@ function buildJsonLd(episode, baseUrl) {
     // Publisher organisation. Defaults to the host's name if no separate
     // publisher is configured. `@id` distinct from the Person so agents
     // can disambiguate "the show's publisher" from "the show's host".
+    //
+    // contactPoint + address fill orank's "Organization schema
+    // completeness" check so AI can verify the business is real and answer
+    // contact queries. Both are config-driven (podcast.yaml → organization)
+    // with sensible fallbacks (owner_email; top-level country).
+    const orgEmail = config.organization?.contact_email || config.owner_email;
+    const orgAddr = config.organization?.address || {};
+    const hasAddr = orgAddr.street || orgAddr.locality || orgAddr.region || orgAddr.postal_code || orgAddr.country;
     const organization = {
       "@type": "Organization",
       "@id": `${baseUrl}/#publisher`,
       name: config.publisher || config.author,
       url: baseUrl,
       logo: cover,
+      ...(orgEmail ? { email: orgEmail } : {}),
+      ...(orgEmail
+        ? {
+            contactPoint: {
+              "@type": "ContactPoint",
+              contactType: config.organization?.contact_type || "customer support",
+              email: orgEmail,
+              ...(config.organization?.telephone ? { telephone: config.organization.telephone } : {}),
+              ...(config.language ? { availableLanguage: config.language } : {}),
+              url: `${baseUrl}/about`,
+            },
+          }
+        : {}),
+      ...(hasAddr
+        ? {
+            address: {
+              "@type": "PostalAddress",
+              ...(orgAddr.street ? { streetAddress: orgAddr.street } : {}),
+              ...(orgAddr.locality ? { addressLocality: orgAddr.locality } : {}),
+              ...(orgAddr.region ? { addressRegion: orgAddr.region } : {}),
+              ...(orgAddr.postal_code ? { postalCode: orgAddr.postal_code } : {}),
+              ...(orgAddr.country ? { addressCountry: orgAddr.country } : {}),
+            },
+          }
+        : {}),
+      foundingDate: config.founding_date || undefined,
+      founder: { "@id": `${baseUrl}/#author` },
       ...(sameAs.length ? { sameAs } : {}),
     };
+
+    // The agent/API access surface as a schema.org `Service`. Broadens
+    // JSON-LD type coverage (orank "Schema type breadth") and lets answer
+    // engines describe what an agent can actually *do* with the show.
+    const service = {
+      "@type": "Service",
+      "@id": `${baseUrl}/#service`,
+      name: `${config.title} — agent & API access`,
+      serviceType: "Podcast content API & MCP server",
+      description:
+        `Programmatic access to ${config.title}: full-text search API, MCP server, ` +
+        "NLWeb /ask endpoint, RSS feed, per-episode transcripts, and a complete agent-readiness layer. Free, no signup.",
+      provider: { "@id": `${baseUrl}/#publisher` },
+      areaServed: config.organization?.address?.country || config.country || "Worldwide",
+      audience: { "@type": "Audience", audienceType: "AI agents and podcast listeners" },
+      url: baseUrl,
+      ...(topics.length ? { keywords: topics.join(", ") } : {}),
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+        availability: "https://schema.org/InStock",
+        category: "Free",
+        url: baseUrl,
+      },
+      ...(aggregateRating ? { aggregateRating } : {}),
+    };
+
+    // Testimonials → schema.org `Review` nodes attached to the show. Feeds
+    // orank's "customer stories" E-E-A-T signal and broadens schema types.
+    const reviews = (Array.isArray(config.testimonials) ? config.testimonials : [])
+      .map((t, i) => {
+        if (!t || !t.quote) return null;
+        return {
+          "@type": "Review",
+          "@id": `${baseUrl}/#review-${i + 1}`,
+          itemReviewed: { "@id": `${baseUrl}/#podcast` },
+          reviewBody: t.quote,
+          ...(t.author
+            ? {
+                author: {
+                  "@type": "Person",
+                  name: t.author,
+                  ...(t.org ? { worksFor: { "@type": "Organization", name: t.org } } : {}),
+                  ...(t.url ? { url: t.url } : {}),
+                },
+              }
+            : {}),
+          ...(t.rating
+            ? {
+                reviewRating: {
+                  "@type": "Rating",
+                  ratingValue: t.rating,
+                  bestRating: 5,
+                  worstRating: 1,
+                },
+              }
+            : {}),
+        };
+      })
+      .filter(Boolean);
 
     // FAQ schema — questions/answers from the localizable `labels.faqs`
     // list in podcast.yaml, surfaced for answer engines.
@@ -341,10 +456,12 @@ function buildJsonLd(episode, baseUrl) {
       "@graph": [
         series,
         product,
+        service,
         organization,
         website,
         person,
         ...(faq ? [faq] : []),
+        ...reviews,
         homeBreadcrumb,
       ],
     };
@@ -463,11 +580,57 @@ function buildJsonLd(episode, baseUrl) {
   };
 }
 
-// ─── Agent-mode JSON view ─────────────────────────────────────────────────
-// Compact response served for `?mode=agent`. Pure capability + endpoint
-// inventory; agents drill into the inventory for richer data instead of
-// us inlining episode lists here.
-function buildAgentJson(episode, baseUrl) {
+// ─── WorkOS auth.md `agent_auth` discovery block ──────────────────────────
+// Single source of truth for the agent_auth block served everywhere the
+// middleware emits it (the agent payload + the /agent/auth challenge). Must
+// stay byte-compatible with the canonical block generated at build time in
+// scripts/generate-oauth.js so the AS/PRM metadata and the live endpoints
+// agree. Per the spec (https://workos.com/auth-md):
+//   - identity_types_supported is drawn from the enum {anonymous,
+//     identity_assertion} ONLY — client_credentials is an OAuth grant, not
+//     an identity type, so it lives in the grant metadata, not here.
+//   - each advertised identity type has a sibling block describing the
+//     request shape (anonymous.credential_types_supported;
+//     identity_assertion.assertion_types_supported + credential_types_supported)
+//     so an agent can look up what to send without guessing.
+//   - skill round-trips back to the published /auth.md walkthrough.
+function agentAuthBlock(baseUrl) {
+  return {
+    skill: `${baseUrl}/auth.md`,
+    register_uri: `${baseUrl}/oauth/register`,
+    claim_uri: `${baseUrl}/oauth/claim`,
+    revocation_uri: `${baseUrl}/oauth/revoke`,
+    identity_types_supported: ["anonymous", "identity_assertion"],
+    anonymous: {
+      credential_types_supported: ["access_token", "api_key"],
+    },
+    identity_assertion: {
+      assertion_types_supported: [
+        "urn:ietf:params:oauth:token-type:id-jag",
+        "verified_email",
+      ],
+      credential_types_supported: ["access_token", "api_key"],
+    },
+    events_supported: [
+      "https://schemas.workos.com/events/agent/auth/identity/assertion/revoked",
+    ],
+    // Non-spec extras (back-compat / convenience pointers).
+    identity_assertion_supported: true,
+    identity_assertion_signing_alg_values_supported: ["EdDSA", "HS256"],
+    id_jag_supported: true,
+    id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    auth_md: `${baseUrl}/auth.md`,
+    www_authenticate_challenge: `${baseUrl}/agent/auth`,
+  };
+}
+
+// ─── Agent-mode view ──────────────────────────────────────────────────────
+// Compact capability + endpoint inventory served for `?mode=agent`. Agents
+// drill into the inventory for richer data instead of us inlining episode
+// lists here. The same payload is rendered two ways: as JSON (when the
+// client sends `Accept: application/json`) and as a human+agent readable
+// HTML briefing (the default for `?mode=agent`, forter-style).
+function buildAgentPayload(episode, baseUrl) {
   const topics = Array.isArray(config.topics) ? config.topics.filter(Boolean) : [];
   const sortedDesc = [...episodes].sort((a, b) => b.id - a.id);
   const latest = sortedDesc[0];
@@ -515,16 +678,10 @@ function buildAgentJson(episode, baseUrl) {
       challenge_url: `${baseUrl}/agent/auth`,
       // WorkOS auth.md spec — agent_auth discovery block mirrored from
       // the AS metadata so agents that read only this JSON envelope
-      // still see register/claim/revoke URIs.
-      agent_auth: {
-        register_uri: `${baseUrl}/oauth/register`,
-        claim_uri: `${baseUrl}/oauth/claim`,
-        revocation_uri: `${baseUrl}/oauth/revoke`,
-        identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
-        identity_assertion_supported: true,
-        id_jag_supported: true,
-        id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      },
+      // still see register/claim/revoke URIs. Shape matches the
+      // canonical block in scripts/generate-oauth.js (per-type
+      // *_supported siblings; identity_types drawn from the spec enum).
+      agent_auth: agentAuthBlock(baseUrl),
       optionalOAuth: {
         type: "oauth2",
         flow: "authorization_code",
@@ -534,7 +691,19 @@ function buildAgentJson(episode, baseUrl) {
         registration: "anonymous",
       },
     },
-    webhooks: { supported: false, note: "Push notifications via RSS only." },
+    webhooks: {
+      supported: true,
+      endpoint: `${baseUrl}/webhooks`,
+      registration: `POST ${baseUrl}/webhooks`,
+      catalog: `GET ${baseUrl}/webhooks`,
+      transport: ["webhook", "websub"],
+      websubHub: `${baseUrl}/webhooks`,
+      events: ["episode.published", "episode.updated", "episode.deleted"],
+      payloadSchema: `${baseUrl}/webhooks#payload`,
+      signature: "HMAC-SHA256 over the raw body in the X-Webhook-Signature header (when a secret is supplied at registration).",
+      docs: `${baseUrl}/api/llms.txt#webhooks`,
+      note: "Subscribe a callback URL for real-time episode events, or use WebSub against the RSS feed.",
+    },
     rateLimits: {
       perMinute: 60,
       scope: "per IP",
@@ -609,7 +778,7 @@ function buildAgentJson(episode, baseUrl) {
     signals: {
       protocols: ["MCP", "WebMCP", "OAuth 2.0 + PKCE", "OpenAPI 3.0", "NLWeb", "ACP", "UCP", "x402", "MPP", "RFC 9598 RateLimit", "RFC 9421 Web Bot Auth", "RFC 8288 Link headers", "IETF AI Preferences (Content-Signal)"],
       capabilities: ["browse_episodes", "search_transcripts", "ask_natural_language", "sse_streaming", "markdown_negotiation", "rss_syndication", "oauth_pkce", "cursor_pagination_ready"],
-      integration: ["rest", "mcp", "webmcp", "oauth", "ask", "tools", "agent", "skill", "rss"],
+      integration: ["rest", "mcp", "webmcp", "oauth", "ask", "tools", "agent", "skill", "rss", "webhook", "websub"],
     },
     agentInstructions: `${baseUrl}/AGENTS.md`,
     skill: `${baseUrl}/SKILL.md`,
@@ -659,6 +828,8 @@ function buildAgentJson(episode, baseUrl) {
       oauthJwks: `${baseUrl}/oauth/jwks.json`,
       agentAuthChallenge: `${baseUrl}/agent/auth`,
       authMd: `${baseUrl}/auth.md`,
+      webhooks: `${baseUrl}/webhooks`,
+      webhookSubscription: `${baseUrl}/webhooks/{id}`,
       donate: `${baseUrl}/donate`,
       x402Discovery: `${baseUrl}/.well-known/discovery/resources`,
       x402Supported: `${baseUrl}/.well-known/x402/supported`,
@@ -691,6 +862,14 @@ function buildAgentJson(episode, baseUrl) {
         : {}),
   };
 
+  return payload;
+}
+
+// JSON rendering of the agent payload. Served when a client explicitly
+// asks for JSON (`Accept: application/json`) — the URL-addressable
+// machine-readable form.
+function buildAgentJson(episode, baseUrl) {
+  const payload = buildAgentPayload(episode, baseUrl);
   return new Response(JSON.stringify(payload, null, 2), {
     headers: apiHeaders({
       "Cache-Control": HTML_CACHE_CONTROL,
@@ -698,6 +877,151 @@ function buildAgentJson(episode, baseUrl) {
       Link: linkHeader(baseUrl, episode),
     }),
   });
+}
+
+// HTML rendering of the agent payload — the default `?mode=agent` view
+// (forter.com/?mode=agent style). A clean, dependency-free document an
+// agent can read as text or a human can open in a browser, with the full
+// machine-readable briefing embedded as JSON at the end so a client that
+// wants structured data never needs a second request.
+function buildAgentHtml(episode, baseUrl) {
+  const p = buildAgentPayload(episode, baseUrl);
+  const h = (s) => esc(typeof s === "string" ? s : String(s ?? ""));
+  const json = JSON.stringify(p, null, 2).replace(/</g, "\\u003c");
+  const rows = (obj) =>
+    Object.entries(obj || {})
+      .filter(([, v]) => typeof v === "string")
+      .map(([k, v]) => `<tr><td><code>${h(k)}</code></td><td>${linkify(v)}</td></tr>`)
+      .join("");
+  const linkify = (v) =>
+    /^https?:\/\//.test(v) ? `<a href="${h(v)}">${h(v)}</a>` : h(v);
+  const list = (arr) =>
+    (Array.isArray(arr) ? arr : []).map((x) => `<li>${h(x)}</li>`).join("");
+
+  const title = p.name + (episode ? ` — Episode ${episode.id}` : "") + " · agent view";
+  const parts = [];
+  parts.push("<!doctype html>");
+  parts.push(`<html lang="${h(config.language || "en")}"><head>`);
+  parts.push(`<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`);
+  parts.push(`<title>${h(title)}</title>`);
+  parts.push(`<meta name="description" content="${h(p.description)}">`);
+  parts.push(`<meta name="robots" content="index,follow">`);
+  parts.push(`<link rel="canonical" href="${h(baseUrl)}/${episode ? episode.id : ""}?mode=agent">`);
+  parts.push(`<link rel="alternate" type="application/json" href="${h(baseUrl)}/${episode ? episode.id : ""}?mode=agent" title="agent JSON">`);
+  parts.push(`<link rel="alternate" type="text/markdown" href="${h(baseUrl)}/${episode ? episode.id + ".md" : "index.md"}" title="markdown">`);
+  parts.push("</head><body>");
+  parts.push(`<h1>${h(p.name)} — agent view</h1>`);
+  parts.push(`<p>${h(p.description)}</p>`);
+
+  parts.push("<h2>Overview</h2>");
+  parts.push("<table>");
+  parts.push(rows({
+    url: p.url,
+    contentType: p.contentType,
+    author: p.author,
+    publisher: p.publisher,
+    language: p.language,
+    updateFrequency: p.updateFrequency,
+    pricing: p.pricing?.note,
+    repository: p.repository,
+  }));
+  parts.push("</table>");
+
+  if (p.whenToUse) {
+    parts.push("<h2>When to use</h2>");
+    parts.push(`<p>${h(p.whenToUse)}</p>`);
+  }
+  if (p.valueProposition) {
+    parts.push("<h2>Why this podcast</h2>");
+    parts.push(`<p>${h(p.valueProposition)}</p>`);
+  }
+
+  parts.push("<h2>Capabilities</h2>");
+  parts.push(`<ul>${list(p.capabilities)}</ul>`);
+
+  parts.push("<h2>Authentication</h2>");
+  parts.push(`<p>${h(p.auth?.note)}</p>`);
+  parts.push("<table>");
+  parts.push(rows({
+    type: p.auth?.type,
+    auth_md: p.auth?.auth_md,
+    challenge_url: p.auth?.challenge_url,
+    register_uri: p.auth?.agent_auth?.register_uri,
+    claim_uri: p.auth?.agent_auth?.claim_uri,
+    revocation_uri: p.auth?.agent_auth?.revocation_uri,
+  }));
+  parts.push("</table>");
+  parts.push(`<p>identity_types_supported: ${(p.auth?.agent_auth?.identity_types_supported || []).map((t) => `<code>${h(t)}</code>`).join(", ")}</p>`);
+
+  parts.push("<h2>Webhooks</h2>");
+  parts.push(`<p>${h(p.webhooks?.note)} Events: ${(p.webhooks?.events || []).map((e) => `<code>${h(e)}</code>`).join(", ")}.</p>`);
+  parts.push("<table>");
+  parts.push(rows({
+    endpoint: p.webhooks?.endpoint,
+    registration: p.webhooks?.registration,
+    websubHub: p.webhooks?.websubHub,
+    payloadSchema: p.webhooks?.payloadSchema,
+  }));
+  parts.push("</table>");
+
+  parts.push("<h2>Rate limits</h2>");
+  parts.push(`<p>${h(p.rateLimits?.perMinute)} requests/minute ${h(p.rateLimits?.scope)}. Headers: ${(p.rateLimits?.headers || []).map((x) => `<code>${h(x)}</code>`).join(", ")}.</p>`);
+
+  parts.push("<h2>Discovery paths &amp; endpoints</h2>");
+  parts.push("<table><thead><tr><th>name</th><th>url</th></tr></thead><tbody>");
+  parts.push(rows(p.endpoints));
+  parts.push("</tbody></table>");
+
+  if (p.compare?.differentiators?.length) {
+    parts.push("<h2>Differentiators</h2>");
+    parts.push(`<ul>${list(p.compare.differentiators)}</ul>`);
+  }
+
+  if (p.episode || p.latestEpisode) {
+    const ep = p.episode || p.latestEpisode;
+    parts.push(`<h2>${p.episode ? "Episode" : "Latest episode"}</h2>`);
+    parts.push("<table>");
+    parts.push(rows({
+      title: ep.title,
+      url: ep.url,
+      markdownUrl: ep.markdownUrl,
+      audioUrl: ep.audioUrl,
+      transcriptUrl: ep.transcriptUrl,
+      datePublished: ep.datePublished,
+      duration: ep.duration,
+    }));
+    parts.push("</table>");
+  }
+
+  parts.push("<h2>Contact</h2>");
+  const email = config.organization?.contact_email || config.owner_email;
+  parts.push(`<p>${email ? `Email: <a href="mailto:${h(email)}">${h(email)}</a>. ` : ""}About: <a href="${h(baseUrl)}/about">${h(baseUrl)}/about</a></p>`);
+
+  parts.push("<h2>Machine-readable briefing</h2>");
+  parts.push(`<p>The same data as JSON (also at <a href="${h(baseUrl)}/${episode ? episode.id : ""}?mode=agent">this URL with <code>Accept: application/json</code></a>):</p>`);
+  parts.push(`<script type="application/json" id="agent-briefing">${json}</script>`);
+  parts.push(`<pre><code>${esc(JSON.stringify(p, null, 2))}</code></pre>`);
+  parts.push("</body></html>");
+
+  return new Response(parts.join("\n"), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": HTML_CACHE_CONTROL,
+      Vary: "Accept",
+      Link: linkHeader(baseUrl, episode),
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+    },
+  });
+}
+
+// `?mode=agent` content negotiation: JSON when the client explicitly
+// prefers it, otherwise the readable HTML briefing (forter-style default).
+function buildAgentView(episode, baseUrl, request) {
+  const chosen = negotiate(request.headers.get("accept"), ["text/html", "application/json"]);
+  return chosen === "application/json"
+    ? buildAgentJson(episode, baseUrl)
+    : buildAgentHtml(episode, baseUrl);
 }
 
 // ─── Markdown view ────────────────────────────────────────────────────────
@@ -1024,6 +1348,8 @@ function linkHeader(baseUrl, episode) {
     // returns the actual HTTP 402. The free read API never returns 402.
     `<${baseUrl}/donate>; rel="payment"; type="application/json"`,
     `<${baseUrl}/.well-known/x402/supported>; rel="x402"; type="application/json"`,
+    // WebSub / webhook subscription surface (rel="hub" per the WebSub spec).
+    `<${baseUrl}/webhooks>; rel="hub"; type="application/json"`,
   ];
   return links.join(", ");
 }
@@ -1293,6 +1619,7 @@ const SITE_URL_REWRITES = new Set([
   "/auth.md",
   "/llms-full.txt",
   "/SKILL.md",
+  "/about.md",
 ]);
 
 const REWRITE_CONTENT_TYPES = {
@@ -1326,6 +1653,7 @@ const REWRITE_CONTENT_TYPES = {
   "/auth.md": "text/markdown; charset=utf-8",
   "/llms-full.txt": "text/plain; charset=utf-8",
   "/SKILL.md": "text/markdown; charset=utf-8",
+  "/about.md": "text/markdown; charset=utf-8",
 };
 
 const REWRITE_CACHE_CONTROL = {
@@ -1358,6 +1686,7 @@ const REWRITE_CACHE_CONTROL = {
   "/auth.md": "public, max-age=3600, stale-while-revalidate=604800",
   "/llms-full.txt": "public, max-age=3600, stale-while-revalidate=604800",
   "/SKILL.md": "public, max-age=3600, stale-while-revalidate=604800",
+  "/about.md": "public, max-age=3600, stale-while-revalidate=604800",
 };
 
 // Cache rules for static files served through middleware (mirrors _headers)
@@ -1424,15 +1753,7 @@ export async function onRequest({ request, next, env }) {
           hint: `${baseUrl}/auth.md`,
           docs_url: "/auth.md",
         },
-        agent_auth: {
-          register_uri: `${baseUrl}/oauth/register`,
-          claim_uri: `${baseUrl}/oauth/claim`,
-          revocation_uri: `${baseUrl}/oauth/revoke`,
-          identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
-          identity_assertion_supported: true,
-          id_jag_supported: true,
-          auth_md: `${baseUrl}/auth.md`,
-        },
+        agent_auth: agentAuthBlock(baseUrl),
       }),
       {
         status: 401,
@@ -1511,6 +1832,16 @@ export async function onRequest({ request, next, env }) {
     return commerce.handleCheckout(request, baseUrl, "acp");
   }
 
+  // Webhook subscription surface. GET /webhooks → catalog (event types +
+  // payload schemas + registration instructions); POST /webhooks → register
+  // a callback (or WebSub form); GET/DELETE /webhooks/<id> → inspect /
+  // unsubscribe. Stateless (the id encodes the subscription), matching the
+  // jobs / checkout-session pattern. Handled before the static-asset branch
+  // so the path doesn't fall through to Pages.
+  if (path === "/webhooks" || path.startsWith("/webhooks/")) {
+    return webhooks.handleWebhooks(request, baseUrl);
+  }
+
   // Absolute-URL placeholders in generated static files
   if (SITE_URL_REWRITES.has(path)) {
     return rewriteSiteUrl(request, next);
@@ -1586,6 +1917,52 @@ export async function onRequest({ request, next, env }) {
     return buildEpisodeMarkdown(ep, baseUrl);
   }
 
+  // Universal markdown twin: append `.md` to ANY content page and get a
+  // text/markdown, heading-led body. The bespoke .md twins are handled
+  // earlier (episode /NN.md above; /index.md, /docs.md, /auth.md, … via the
+  // SITE_URL_REWRITES branch), so this catch-all covers the rest — most
+  // importantly the well-known docs an agent samples, e.g.
+  // /.well-known/oauth-authorization-server.md and
+  // /.well-known/openapi.json.md. We fetch the underlying resource from the
+  // Pages asset store, rewrite {{SITE_URL}}, and wrap JSON/XML in a fenced
+  // code block under a heading so the body is valid markdown (never HTML).
+  if (path.endsWith(".md") && env?.ASSETS) {
+    const base = path.slice(0, -3) || "/";
+    const assetUrl = new URL(request.url);
+    assetUrl.pathname = base;
+    const upstream = await env.ASSETS.fetch(new Request(assetUrl, { method: "GET", headers: request.headers }));
+    const upType = (upstream.headers.get("content-type") || "").toLowerCase();
+    // Pages' SPA fallback serves index.html (200, text/html) for any missing
+    // asset — that's a real 404 for a `.md` twin, not a hit.
+    const isSpaFallback = upstream.status === 200 && /^text\/html\b/i.test(upType);
+    if (upstream.status !== 200 || isSpaFallback) {
+      return errors.notFound(path);
+    }
+    let body = (await upstream.text()).replace(/\{\{SITE_URL\}\}/g, baseUrl);
+    const fence =
+      /json/.test(upType) || base.endsWith(".json") ? "json" :
+      /xml/.test(upType) || base.endsWith(".xml") ? "xml" :
+      /yaml|yml/.test(upType) || /\.ya?ml$/.test(base) ? "yaml" :
+      null;
+    const isText = /^text\/(markdown|plain)\b/.test(upType) || base.endsWith(".txt") || base.endsWith(".md");
+    let md;
+    if (isText && !fence) {
+      // Already markdown/plain — ensure it leads with a heading.
+      md = /^\s*#/.test(body) ? body : `# ${base}\n\n${body}`;
+    } else {
+      const lang = fence || "";
+      md = `# ${base}\n\n> Markdown view of \`${baseUrl}${base}\`.\n\n\`\`\`${lang}\n${body}\n\`\`\`\n`;
+    }
+    return new Response(md, {
+      headers: apiHeaders({
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=604800",
+        Vary: "Accept",
+        Link: linkHeader(baseUrl, null),
+      }),
+    });
+  }
+
   // Convenience aliases — paths most consumers expect at the site root,
   // mapped to canonical artifact paths. Pages routes by URL path, so we
   // can't call next() with a rewritten URL; we fetch the static asset
@@ -1602,6 +1979,7 @@ export async function onRequest({ request, next, env }) {
     "/pricing": "/pricing.md",
     "/compare": "/compare.md",
     "/auth": "/auth.md",
+    "/about": "/about.md",
     "/openapi.json": "/.well-known/openapi.json",
     "/openapi.yaml": "/.well-known/openapi.yaml",
     "/swagger.json": "/.well-known/openapi.json",
@@ -1675,9 +2053,10 @@ export async function onRequest({ request, next, env }) {
   if (epMatch) {
     const id = parseInt(epMatch[1]);
     const ep = episodes.find((e) => e.id === id);
-    // Explicit ?mode=agent forces the JSON view, bypassing Accept.
+    // Explicit ?mode=agent → readable HTML briefing by default, JSON when
+    // the client sends Accept: application/json (forter-style).
     if (wantsAgentMode(url)) {
-      return ep ? buildAgentJson(ep, baseUrl) : errors.episodeNotFound(id);
+      return ep ? buildAgentView(ep, baseUrl, request) : errors.episodeNotFound(id);
     }
     const chosen = negotiate(request.headers.get("accept"), NEGOTIABLE_TYPES);
     if (chosen === null) return errors.notAcceptable(NEGOTIABLE_TYPES);
@@ -1700,7 +2079,7 @@ export async function onRequest({ request, next, env }) {
 
   // Homepage — agent JSON view, markdown negotiation, or HTML
   if (path === "/" || path === "") {
-    if (wantsAgentMode(url)) return buildAgentJson(null, baseUrl);
+    if (wantsAgentMode(url)) return buildAgentView(null, baseUrl, request);
     const chosen = negotiate(request.headers.get("accept"), NEGOTIABLE_TYPES);
     if (chosen === null) return errors.notAcceptable(NEGOTIABLE_TYPES);
     if (chosen === "application/json") return buildAgentJson(null, baseUrl);

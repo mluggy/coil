@@ -20,6 +20,8 @@ import { API_VERSION } from "../functions/_api.js";
 
 const SITE = "{{SITE_URL}}";
 
+const WEBHOOK_EVENTS = ["episode.published", "episode.updated", "episode.deleted"];
+
 // Reused response refs for the consistent error envelope + rate-limit
 // headers. Keeps the typed coverage at 7/7 instead of 2/7.
 const errorResponses = {
@@ -170,6 +172,23 @@ const spec = {
         max_items: 100,
       },
     },
+    // Event-driven webhooks (OpenAPI 3.1 promotes this to a root `webhooks`
+    // object; we keep it as an info extension so the 3.0.3 parser orank
+    // uses doesn't bail). Mirrors the live /webhooks registration surface.
+    "x-webhooks": {
+      registration_endpoint: `${SITE}/webhooks`,
+      subscription_endpoint: `${SITE}/webhooks/{id}`,
+      transports: ["webhook", "websub"],
+      websub_hub: `${SITE}/webhooks`,
+      events_supported: WEBHOOK_EVENTS,
+      payload_schema: "#/components/schemas/WebhookEvent",
+      delivery: {
+        method: "POST",
+        signature_header: "X-Webhook-Signature",
+        signature: "hex HMAC-SHA256 of the raw body keyed by the registration secret",
+      },
+      docs: `${SITE}/api/llms.txt#webhooks`,
+    },
   },
   servers: [{ url: SITE }],
   // Explicit empty security requirement: the whole API is public and
@@ -183,6 +202,7 @@ const spec = {
     { name: "discovery", description: "Agent-discovery surfaces (status, briefing, RSS, catalog)." },
     { name: "mcp", description: "Model Context Protocol server and discovery." },
     { name: "payments", description: "Voluntary x402 / MPP tip-jar." },
+    { name: "webhooks", description: "Event subscriptions (webhook callbacks + WebSub)." },
   ],
   paths: {
     "/api/search": {
@@ -486,6 +506,129 @@ const spec = {
             description: "Health snapshot.",
             headers: rateLimitResponseHeaders(),
             content: { "application/json": { schema: { $ref: "#/components/schemas/StatusResponse" } } },
+          },
+          ...errorResponses,
+        },
+      },
+    },
+    "/webhooks": {
+      get: {
+        summary: "Webhook event catalog",
+        description:
+          "Returns the supported event types, payload schema, delivery " +
+          "semantics, and how to register (JSON callback or WebSub).",
+        operationId: "getWebhookCatalog",
+        tags: ["webhooks"],
+        responses: {
+          "200": {
+            description: "Webhook catalog.",
+            headers: rateLimitResponseHeaders(),
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    events_supported: { type: "array", items: { type: "string", enum: WEBHOOK_EVENTS } },
+                    registration_endpoint: { type: "string", format: "uri" },
+                    payload_schema: { type: "object" },
+                    example_payload: { $ref: "#/components/schemas/WebhookEvent" },
+                  },
+                },
+              },
+            },
+          },
+          ...errorResponses,
+        },
+      },
+      post: {
+        summary: "Register a webhook subscription",
+        description:
+          "Register a callback URL to receive episode events. Send JSON " +
+          "`{ url, events?, secret? }` for a webhook, or a WebSub form " +
+          "(`hub.mode=subscribe&hub.topic=…&hub.callback=…`). Returns 201 " +
+          "(webhook) or 202 (WebSub) with a `Location` header.",
+        operationId: "createWebhookSubscription",
+        tags: ["webhooks"],
+        parameters: [
+          { $ref: "#/components/parameters/IdempotencyKey" },
+          { $ref: "#/components/parameters/ApiVersion" },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["url"],
+                properties: {
+                  url: { type: "string", format: "uri", description: "HTTPS callback URL." },
+                  events: { type: "array", items: { type: "string", enum: WEBHOOK_EVENTS } },
+                  secret: { type: "string", description: "Shared secret for HMAC-SHA256 delivery signatures." },
+                },
+              },
+            },
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                properties: {
+                  "hub.mode": { type: "string", enum: ["subscribe", "unsubscribe"] },
+                  "hub.topic": { type: "string", format: "uri" },
+                  "hub.callback": { type: "string", format: "uri" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Webhook subscription created.",
+            headers: {
+              Location: { description: "Subscription resource URL.", schema: { type: "string", format: "uri" } },
+              ...rateLimitResponseHeaders(),
+            },
+            content: { "application/json": { schema: { $ref: "#/components/schemas/WebhookSubscription" } } },
+          },
+          "202": {
+            description: "WebSub subscription accepted (intent verification follows out of band).",
+            headers: { Location: { description: "Subscription resource URL.", schema: { type: "string", format: "uri" } } },
+          },
+          ...errorResponses,
+        },
+      },
+    },
+    "/webhooks/{id}": {
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" }, description: "Opaque subscription id from registration." },
+      ],
+      get: {
+        summary: "Inspect a webhook subscription",
+        operationId: "getWebhookSubscription",
+        tags: ["webhooks"],
+        responses: {
+          "200": {
+            description: "Subscription detail.",
+            headers: rateLimitResponseHeaders(),
+            content: { "application/json": { schema: { $ref: "#/components/schemas/WebhookSubscription" } } },
+          },
+          ...errorResponses,
+        },
+      },
+      delete: {
+        summary: "Unsubscribe a webhook",
+        operationId: "deleteWebhookSubscription",
+        tags: ["webhooks"],
+        responses: {
+          "200": {
+            description: "Unsubscribed (idempotent).",
+            headers: rateLimitResponseHeaders(),
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { id: { type: "string" }, status: { type: "string", enum: ["unsubscribed"] } },
+                },
+              },
+            },
           },
           ...errorResponses,
         },
@@ -1130,6 +1273,42 @@ const spec = {
             },
           },
           generated_at: { type: "string", format: "date-time" },
+        },
+      },
+      WebhookSubscription: {
+        type: "object",
+        required: ["id", "status", "callback", "events"],
+        properties: {
+          id: { type: "string", description: "Opaque subscription id." },
+          status: { type: "string", enum: ["active", "accepted", "unsubscribed"] },
+          callback: { type: "string", format: "uri" },
+          events: { type: "array", items: { type: "string", enum: WEBHOOK_EVENTS } },
+          created_at: { type: "string", format: "date-time" },
+          self: { type: "string", format: "uri" },
+        },
+      },
+      WebhookEvent: {
+        type: "object",
+        required: ["id", "type", "created", "data"],
+        description: "Delivery payload POSTed to a subscribed callback.",
+        properties: {
+          id: { type: "string", description: "Unique event id (evt_…)." },
+          type: { type: "string", enum: WEBHOOK_EVENTS },
+          created: { type: "string", description: "ISO 8601 date the event fired." },
+          data: {
+            type: "object",
+            properties: {
+              episode: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  title: { type: "string" },
+                  url: { type: "string", format: "uri" },
+                  audioUrl: { type: "string", format: "uri" },
+                },
+              },
+            },
+          },
         },
       },
       McpManifest: {

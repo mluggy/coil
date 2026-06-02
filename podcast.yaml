@@ -152,6 +152,55 @@ host:
   wikipedia_url: ""    # e.g. "https://en.wikipedia.org/wiki/Your_Name"
   github_url: ""       # e.g. "https://github.com/yourhandle"
   linkedin_url: ""     # e.g. "https://www.linkedin.com/in/yourhandle/" — host's personal profile (separate from show-level linkedin_url)
+  # Employer / current affiliation. Emitted as Person.worksFor
+  # (Organization) in JSON-LD and shown on /about. Leave empty to omit.
+  works_for: ""        # e.g. "Acme Corp"
+  # Credentials / background bullets that establish expertise. Each becomes
+  # a Person.hasCredential (EducationalOccupationalCredential) entry in
+  # JSON-LD and a bullet on /about. Directly addresses orank's
+  # "author credentials" E-E-A-T gap. Plain strings or { name, url } maps.
+  # Example:
+  #   credentials:
+  #     - "20+ years building developer tools"
+  #     - { name: "Ex-founder, three venture-backed startups", url: "https://…" }
+  credentials: []
+  # Areas of demonstrated expertise. Emitted as Person.knowsAbout (Thing[])
+  # — helps answer engines attribute topical authority to the host.
+  knows_about: []      # e.g. ["AI agents", "Machine learning", "Developer tooling"]
+
+# -- Business entity / contact (Organization JSON-LD) --
+# Fills the contactPoint + address fields orank's "Organization schema
+# completeness" check looks for, so AI can verify the business is real and
+# answer contact queries. All fields optional. contact_email falls back to
+# owner_email; address.country falls back to the top-level `country`.
+organization:
+  contact_email: ""                  # public support email (falls back to owner_email)
+  contact_type: "customer support"   # schema.org contactType
+  telephone: ""                      # E.164, e.g. "+1-555-0100" — leave empty to omit
+  address:
+    street: ""                       # streetAddress (leave empty to omit)
+    locality: ""                     # city, e.g. "Tel Aviv"
+    region: ""                       # state / district
+    postal_code: ""                  # ZIP / postal code
+    country: ""                      # ISO 3166-1 alpha-2 (falls back to `country` above)
+
+# -- Social proof (optional) --
+# Testimonials / case mentions from listeners or notable companies. Each is
+# emitted as a schema.org Review on the show and surfaced on /about — feeds
+# orank's "customer stories" / E-E-A-T and "Schema type breadth" checks.
+# Leave empty to omit. Shape: { quote, author, org?, url?, rating? }.
+# Example:
+#   testimonials:
+#     - quote: "The only podcast my whole team listens to."
+#       author: "Jane Doe"
+#       org: "Acme Corp"
+#       rating: 5
+testimonials: []
+
+# External partnerships / affiliations to surface for authoritativeness
+# (emitted on /about and as Organization sameAs/knowsAbout where a URL is
+# given). Shape: { name, url? }. Leave empty to omit.
+partners: []
 
 # -- Platform links --
 # These appear as icons in the header and in the JSON-LD sameAs array.

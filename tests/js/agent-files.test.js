@@ -76,8 +76,13 @@ describe("/.well-known/agent.json", () => {
     expect(m.agent_auth.claim_uri).toMatch(/\/oauth\/claim$/);
     expect(m.agent_auth.revocation_uri).toMatch(/\/oauth\/revoke$/);
     expect(m.agent_auth.identity_types_supported).toEqual(
-      expect.arrayContaining(["anonymous", "client_credentials", "identity_assertion"])
+      ["anonymous", "identity_assertion"]
     );
+    expect(m.agent_auth.anonymous.credential_types_supported).toContain("api_key");
+    expect(m.agent_auth.identity_assertion.assertion_types_supported).toContain(
+      "urn:ietf:params:oauth:token-type:id-jag"
+    );
+    expect(m.agent_auth.skill).toMatch(/\/auth\.md$/);
     expect(m.agent_auth.id_jag_supported).toBe(true);
     expect(m.agent_auth.auth_md).toMatch(/\/auth\.md$/);
     expect(m.endpoints.authMd).toMatch(/\/auth\.md$/);

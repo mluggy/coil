@@ -373,13 +373,16 @@ async function handleRegister({ request, baseUrl }) {
         {
           registration_endpoint: `${baseUrl}/oauth/register`,
           registration_endpoint_methods_supported: ["GET", "POST"],
-          identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+          // WorkOS auth.md enum — anonymous + identity_assertion only.
+          // client_credentials is a grant, advertised in the AS metadata's
+          // grant_types_supported, not an identity type.
+          identity_types_supported: ["anonymous", "identity_assertion"],
           // The same templates inlined in the AS metadata, so an agent
           // that hits this endpoint directly (rather than walking from
           // the AS doc) still gets the full template inventory.
           templates: REGISTRATION_TEMPLATES(baseUrl),
           auth_md: `${baseUrl}/auth.md`,
-          skill: `${baseUrl}/.well-known/agent-skills/use-agent-auth/SKILL.md`,
+          skill: `${baseUrl}/auth.md`,
         },
         null,
         2
@@ -466,11 +469,12 @@ function REGISTRATION_TEMPLATES(baseUrl) {
     },
     {
       id: "service-account",
-      identity_type: "client_credentials",
+      identity_type: "anonymous",
       name: "Service account (M2M)",
       description:
         "Registration template for a non-interactive backend agent. " +
-        "Uses client_credentials grant against the same public client id.",
+        "Uses the client_credentials grant against the public client id; " +
+        "the issued credential is an anonymous access_token.",
       method: "POST",
       uri: `${baseUrl}/oauth/register`,
       content_type: "application/json",

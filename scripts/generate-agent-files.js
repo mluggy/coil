@@ -54,6 +54,7 @@ const agentJson = {
     "get_latest_episode",
     "get_episode_by_topic",
     "subscribe_via_rss",
+    "subscribe_via_webhook",
     "read_transcripts",
   ],
   endpoints: {
@@ -87,6 +88,10 @@ const agentJson = {
     wellKnownLlms: `${SITE}/.well-known/llms.txt`,
     indexMarkdown: `${SITE}/index.md`,
     agentMode: `${SITE}/?mode=agent`,
+    about: `${SITE}/about`,
+    aboutMarkdown: `${SITE}/about.md`,
+    webhooks: `${SITE}/webhooks`,
+    webhookSubscription: `${SITE}/webhooks/{id}`,
     agents: `${SITE}/AGENTS.md`,
     // WorkOS auth.md surface — the prose walkthrough and the 401
     // WWW-Authenticate challenge endpoint. Listed so a single GET on
@@ -101,17 +106,48 @@ const agentJson = {
   },
   // Top-level agent_auth block per WorkOS auth.md so scanners that
   // only parse the agent.json envelope don't have to follow a second
-  // hop into RFC 8414 metadata.
+  // hop into RFC 8414 metadata. Shape mirrors the canonical block in
+  // scripts/generate-oauth.js — spec-enum identity_types with per-type
+  // *_supported siblings, and `skill` round-tripping to /auth.md.
   agent_auth: {
+    skill: `${SITE}/auth.md`,
     register_uri: `${SITE}/oauth/register`,
     claim_uri: `${SITE}/oauth/claim`,
     revocation_uri: `${SITE}/oauth/revoke`,
-    identity_types_supported: ["anonymous", "client_credentials", "identity_assertion"],
+    identity_types_supported: ["anonymous", "identity_assertion"],
+    anonymous: {
+      credential_types_supported: ["access_token", "api_key"],
+    },
+    identity_assertion: {
+      assertion_types_supported: [
+        "urn:ietf:params:oauth:token-type:id-jag",
+        "verified_email",
+      ],
+      credential_types_supported: ["access_token", "api_key"],
+    },
+    events_supported: [
+      "https://schemas.workos.com/events/agent/auth/identity/assertion/revoked",
+    ],
     identity_assertion_supported: true,
     id_jag_supported: true,
     id_jag_grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
     auth_md: `${SITE}/auth.md`,
     www_authenticate_challenge: `${SITE}/agent/auth`,
+  },
+  // Real-time event subscriptions — registration endpoint + WebSub hub.
+  // orank's webhook-support check scans agent.json + the /webhooks path.
+  webhooks: {
+    supported: true,
+    endpoint: `${SITE}/webhooks`,
+    registration: `POST ${SITE}/webhooks`,
+    catalog: `GET ${SITE}/webhooks`,
+    subscription: `${SITE}/webhooks/{id}`,
+    transports: ["webhook", "websub"],
+    websubHub: `${SITE}/webhooks`,
+    events: ["episode.published", "episode.updated", "episode.deleted"],
+    payloadSchema: `${SITE}/webhooks#payload`,
+    signatureHeader: "X-Webhook-Signature",
+    docs: `${SITE}/api/llms.txt#webhooks`,
   },
   rateLimits: {
     perMinute: 60,
@@ -208,7 +244,7 @@ const agentCard = {
   version: "1.0",
   defaultInputModes: ["text/plain"],
   defaultOutputModes: ["application/json", "text/plain"],
-  capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: false },
+  capabilities: { streaming: false, pushNotifications: true, stateTransitionHistory: false },
   skills: [
     {
       id: "find_episode_by_topic",
@@ -268,6 +304,8 @@ const schemaMap = `<?xml version="1.0" encoding="UTF-8"?>
   <feed url="${SITE}/api/llms.txt" type="text/plain" />
   <feed url="${SITE}/.well-known/llms.txt" type="text/plain" />
   <feed url="${SITE}/index.md" type="text/markdown" />
+  <feed url="${SITE}/about.md" type="text/markdown" />
+  <feed url="${SITE}/webhooks" type="application/json" />
   <feed url="${SITE}/.well-known/agent.json" type="application/json" />
   <feed url="${SITE}/.well-known/agent-card.json" type="application/json" />
   <feed url="${SITE}/.well-known/agent-skills/index.json" type="application/json" />
@@ -372,6 +410,135 @@ md.push("");
 writeFileSync("public/index.md", md.join("\n"));
 console.log("Generated public/index.md");
 
+// ─── /about.md ────────────────────────────────────────────────────────────
+// Author bio + credentials + contact + trust signals. Serves orank's
+// E-E-A-T checks (author background, business model, ToS/privacy links,
+// testimonials). Served at /about (alias → /about.md) and /about.md.
+const host = config.host || {};
+const about = [];
+about.push(`# About ${config.title}`);
+about.push("");
+if (config.description) {
+  about.push(`> ${config.description}`);
+  about.push("");
+}
+about.push(
+  `${config.title} is an independent, listener-supported podcast. Every ` +
+  `episode ships with a full searchable transcript and a complete ` +
+  `agent-readiness layer (search API, MCP server, /ask endpoint, webhooks, ` +
+  `and discovery files under /.well-known/). It is free — no signup, no ads, ` +
+  `no paywall.`
+);
+about.push("");
+
+// Author / host bio + credentials.
+if (config.author) {
+  about.push(`## About the host`);
+  about.push("");
+  const hostLine = [config.author, host.job_title].filter(Boolean).join(" — ");
+  about.push(`**${hostLine}**`);
+  about.push("");
+  if (host.bio) {
+    about.push(host.bio);
+    about.push("");
+  }
+  if (host.works_for) {
+    about.push(`Currently at **${host.works_for}**.`);
+    about.push("");
+  }
+  const credentials = Array.isArray(host.credentials) ? host.credentials : [];
+  if (credentials.length) {
+    about.push("### Background & credentials");
+    about.push("");
+    for (const c of credentials) {
+      const name = typeof c === "string" ? c : c?.name;
+      if (!name) continue;
+      about.push(typeof c === "object" && c.url ? `- [${name}](${c.url})` : `- ${name}`);
+    }
+    about.push("");
+  }
+  const knowsAbout = Array.isArray(host.knows_about) ? host.knows_about : [];
+  if (knowsAbout.length) {
+    about.push("### Areas of expertise");
+    about.push("");
+    about.push(knowsAbout.join(" · "));
+    about.push("");
+  }
+  const hostLinks = [
+    ["LinkedIn", host.linkedin_url || config.linkedin_url],
+    ["GitHub", host.github_url],
+    ["Wikipedia", host.wikipedia_url],
+  ].filter(([, u]) => u);
+  if (hostLinks.length) {
+    about.push("### Find the host");
+    about.push("");
+    for (const [name, url] of hostLinks) about.push(`- [${name}](${url})`);
+    about.push("");
+  }
+}
+
+// Business model — explicit trust signal.
+about.push("## Business model");
+about.push("");
+about.push(
+  `${config.title} is free to listeners. There is no subscription and no ` +
+  `advertising paywall. ${config.funding_url ? `Listeners who want to support the show can do so at [${config.funding_url}](${config.funding_url}).` : ""} ` +
+  `An optional USDC tip jar for payment-aware agents lives at \`${SITE}/donate\`.`.trim()
+);
+about.push("");
+
+// Testimonials (optional).
+const testimonials = Array.isArray(config.testimonials) ? config.testimonials : [];
+if (testimonials.length) {
+  about.push("## What listeners say");
+  about.push("");
+  for (const t of testimonials) {
+    if (!t || !t.quote) continue;
+    const by = [t.author, t.org].filter(Boolean).join(", ");
+    about.push(`> ${t.quote}`);
+    if (by) about.push(`> — ${by}`);
+    about.push("");
+  }
+}
+
+// Partners (optional).
+const partners = Array.isArray(config.partners) ? config.partners : [];
+if (partners.length) {
+  about.push("## Partners");
+  about.push("");
+  for (const p of partners) {
+    if (!p || !p.name) continue;
+    about.push(p.url ? `- [${p.name}](${p.url})` : `- ${p.name}`);
+  }
+  about.push("");
+}
+
+// Contact.
+const aboutEmail = config.organization?.contact_email || config.owner_email;
+about.push("## Contact");
+about.push("");
+if (aboutEmail) about.push(`- Email: [${aboutEmail}](mailto:${aboutEmail})`);
+const addr = config.organization?.address || {};
+const addrLine = [addr.locality, addr.region, addr.country].filter(Boolean).join(", ");
+if (addrLine) about.push(`- Location: ${addrLine}`);
+about.push(`- Web: ${SITE}`);
+about.push("");
+
+// Legal — link ToS + privacy so the trust surface is one hop from /about.
+const aboutLegal = [
+  [config.labels?.terms, config.labels?.terms_text, "/terms"],
+  [config.labels?.privacy, config.labels?.privacy_text, "/privacy"],
+].filter(([title, text]) => title && text);
+if (aboutLegal.length) {
+  about.push("## Legal");
+  about.push("");
+  for (const [title, , p] of aboutLegal) about.push(`- [${title}](${SITE}${p})`);
+  about.push("");
+}
+
+writeFileSync("public/about.md", about.join("\n"));
+console.log("Generated public/about.md");
+
 // ─── /AGENTS.md ───────────────────────────────────────────────────────────
 // Listener-agent contributor doc. Tells AI agents (browse-on-behalf,
 // search/answer engines, native MCP clients) what surfaces this deployment
@@ -429,6 +596,8 @@ agents.push(`- **MCP discovery (all return the same manifest):** [/.well-known/m
 agents.push(`- **OpenAPI 3.1:** [/.well-known/openapi.json](${SITE}/.well-known/openapi.json)`);
 agents.push(`- **OAuth (RFC 8414, RFC 9728, OIDC):** [/.well-known/oauth-authorization-server](${SITE}/.well-known/oauth-authorization-server), [/.well-known/oauth-protected-resource](${SITE}/.well-known/oauth-protected-resource), [/.well-known/openid-configuration](${SITE}/.well-known/openid-configuration)`);
 agents.push(`- **x402 / MPP (optional tip jar):** [/.well-known/x402/supported](${SITE}/.well-known/x402/supported), [/.well-known/discovery/resources](${SITE}/.well-known/discovery/resources), [POST /donate](${SITE}/donate) → HTTP 402`);
+agents.push(`- **Webhooks:** [/webhooks](${SITE}/webhooks) — event catalog + registration (POST). Events: \`episode.published\`, \`episode.updated\`, \`episode.deleted\`. WebSub hub at the same URL.`);
+agents.push(`- **About / E-E-A-T:** [/about](${SITE}/about) ([/about.md](${SITE}/about.md)) — host bio, credentials, contact, business model, legal.`);
 agents.push(`- **Schema map (NLWeb):** [/.well-known/schema-map.xml](${SITE}/.well-known/schema-map.xml)`);
 agents.push(`- **Sitemap:** [/sitemap.xml](${SITE}/sitemap.xml)`);
 agents.push(`- **HTTP Link headers (RFC 8288):** every HTML response advertises sitemap, markdown alternates, OpenAPI, agent.json, agent-card, agent-skills, MCP, RSS, and llms.txt.`);
@@ -627,6 +796,24 @@ const apiCatalog = {
         { href: `${SITE}/oauth/token`, type: "application/json", title: "token_endpoint (client_credentials, authorization_code, refresh_token, jwt-bearer/id-jag)" },
         { href: `${SITE}/oauth/authorize`, type: "application/json", title: "authorization_endpoint (PKCE S256)" },
         { href: `${SITE}/oauth/jwks.json`, type: "application/json", title: "JWKS" },
+      ],
+    },
+    {
+      // Webhook / WebSub subscription surface.
+      anchor: `${SITE}/webhooks`,
+      "service-desc": [
+        { href: `${SITE}/.well-known/openapi.json`, type: OAS_TYPE, title: "OpenAPI 3.0 spec (/webhooks)" },
+      ],
+      "service-doc": [
+        { href: `${SITE}/webhooks`, type: "application/json", title: "Webhook event catalog + payload schema" },
+        { href: `${SITE}/api/llms.txt`, type: "text/plain", title: "Webhook usage" },
+      ],
+      related: [
+        { href: "https://www.w3.org/TR/websub/", type: "text/html", title: "WebSub (W3C)" },
+      ],
+      item: [
+        { href: `${SITE}/webhooks`, type: "application/json", title: "Register a subscription (POST) / event catalog (GET)" },
+        { href: `${SITE}/webhooks/{id}`, type: "application/json", title: "Inspect (GET) / unsubscribe (DELETE) a subscription" },
       ],
     },
   ],

@@ -96,7 +96,28 @@ export function deriveConfig(raw) {
       ? {
           ...raw.host,
           linkedin_url: raw.host.linkedin_url || "",
+          works_for: raw.host.works_for || "",
+          credentials: Array.isArray(raw.host.credentials) ? raw.host.credentials : [],
+          knows_about: Array.isArray(raw.host.knows_about) ? raw.host.knows_about : [],
         }
       : {},
+    // Organization contact + address (JSON-LD contactPoint / PostalAddress).
+    // contact_email falls back to owner_email; address.country falls back to
+    // the top-level country so every deployment emits at least a minimal,
+    // valid PostalAddress without extra config.
+    organization: {
+      contact_email: raw.organization?.contact_email || raw.owner_email || "",
+      contact_type: raw.organization?.contact_type || "customer support",
+      telephone: raw.organization?.telephone || "",
+      address: {
+        street: raw.organization?.address?.street || "",
+        locality: raw.organization?.address?.locality || "",
+        region: raw.organization?.address?.region || "",
+        postal_code: raw.organization?.address?.postal_code || "",
+        country: raw.organization?.address?.country || country || "",
+      },
+    },
+    testimonials: Array.isArray(raw.testimonials) ? raw.testimonials : [],
+    partners: Array.isArray(raw.partners) ? raw.partners : [],
   };
 }

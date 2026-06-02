@@ -1926,6 +1926,24 @@ export async function onRequest({ request, next, env }) {
   // Pages asset store, rewrite {{SITE_URL}}, and wrap JSON/XML in a fenced
   // code block under a heading so the body is valid markdown (never HTML).
   if (path.endsWith(".md") && env?.ASSETS) {
+    // Real static `.md` assets (e.g. the per-skill Agent Skills artifacts at
+    // /.well-known/agent-skills/<name>/SKILL.md) must be served as-is — the
+    // twin logic below would strip `.md`, fail to find the bare path, and
+    // 404 the artifact, breaking the agent-skills index. Serve the literal
+    // file untouched (no {{SITE_URL}} rewrite) so its bytes — and therefore
+    // its published sha256 digest — stay identical to what the index pins.
+    const literal = await env.ASSETS.fetch(
+      new Request(request.url, { method: "GET", headers: request.headers }),
+    );
+    const literalType = (literal.headers.get("content-type") || "").toLowerCase();
+    const literalIsSpa = literal.status === 200 && /^text\/html\b/i.test(literalType);
+    if (literal.status === 200 && !literalIsSpa) {
+      const headers = new Headers(literal.headers);
+      headers.set("Content-Type", "text/markdown; charset=utf-8");
+      headers.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=604800");
+      headers.set("Vary", "Accept");
+      return new Response(literal.body, { status: 200, headers });
+    }
     const base = path.slice(0, -3) || "/";
     const assetUrl = new URL(request.url);
     assetUrl.pathname = base;

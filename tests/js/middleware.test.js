@@ -640,3 +640,68 @@ describe("legacy redirects", () => {
     expect(resp.status).toBe(301);
   });
 });
+
+// Regression: the universal `.md` twin handler used to strip `.md` from
+// every request and 404 when the bare path wasn't an asset — which
+// shadowed the real per-skill Agent Skills artifacts (served as static
+// files at /.well-known/agent-skills/<name>/SKILL.md) and broke the
+// v0.2.0 index. A real `.md` asset must be served verbatim (byte-stable
+// so its published sha256 digest still matches), while a `.md` twin of a
+// non-.md resource must still be synthesized.
+describe("static .md asset vs .md twin", () => {
+  const SKILL_BODY =
+    "---\nname: find-episode-by-topic\n---\n\nRelative links only: /api/search?q=x\n";
+  // Realistic Pages binding: real static files resolve; everything else
+  // falls back to SPA index.html (200 text/html), exactly like Pages.
+  const realEnv = {
+    ASSETS: {
+      fetch(req) {
+        const p = new URL(req.url).pathname;
+        if (p === "/.well-known/agent-skills/find-episode-by-topic/SKILL.md") {
+          return Promise.resolve(
+            new Response(SKILL_BODY, {
+              status: 200,
+              headers: { "Content-Type": "text/markdown; charset=utf-8" },
+            })
+          );
+        }
+        if (p === "/.well-known/oauth-authorization-server") {
+          return Promise.resolve(
+            new Response('{"issuer":"{{SITE_URL}}"}', {
+              status: 200,
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+            })
+          );
+        }
+        // SPA fallback for any missing asset (including the bare `.md` path).
+        return Promise.resolve(
+          new Response("<!DOCTYPE html><title>spa</title>", {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          })
+        );
+      },
+    },
+  };
+  const callReal = (path, init = {}) =>
+    onRequest({ request: makeReq(path, init), next, env: realEnv });
+
+  it("serves a real per-skill SKILL.md verbatim (digest-stable)", async () => {
+    const resp = await callReal("/.well-known/agent-skills/find-episode-by-topic/SKILL.md");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
+    // Body unchanged — no {{SITE_URL}} rewrite, no fence-wrapping — so the
+    // bytes match the digest pinned in the agent-skills index.
+    expect(await resp.text()).toBe(SKILL_BODY);
+  });
+
+  it("still synthesizes a .md twin for a non-.md resource", async () => {
+    const resp = await callReal("/.well-known/oauth-authorization-server.md");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("Content-Type")).toMatch(/text\/markdown/);
+    const body = await resp.text();
+    // Twin path fetched the base JSON, fenced it, and rewrote {{SITE_URL}}.
+    expect(body).toMatch(/```json/);
+    expect(body).not.toMatch(/\{\{SITE_URL\}\}/);
+  });
+});

@@ -183,20 +183,38 @@ organization:
 
 # -- Social proof (optional) --
 # Testimonials / case mentions from listeners or notable companies. Each is
-# emitted as a schema.org Review on the show and surfaced on /about — feeds
-# orank's "customer stories" / E-E-A-T and "Schema type breadth" checks.
-# Leave empty to omit. Shape: { quote, author, org?, url?, rating? }.
+# emitted as a schema.org Review on the homepage AND rendered under "What
+# listeners say" on /about — feeds orank's "customer stories" / E-E-A-T and
+# "Schema type breadth" checks. Per-entry fields:
+#   quote   (REQUIRED) the testimonial text. An entry without it is skipped.
+#   author  (optional) person's name → Review.author. A real, NAMED author
+#           is what earns the E-E-A-T credit; "Anonymous" renders but adds
+#           little authority. Pair with org/url for the strongest signal.
+#   org     (optional) author's company or role → author.affiliation.
+#   url     (optional) link to the author or the quote's source → author.url
+#           (adds verifiability).
+#   rating  (optional) number 1–5 → Review.reviewRating.
+# Leave empty ([]) to omit.
 # Example:
 #   testimonials:
 #     - quote: "The only podcast my whole team listens to."
 #       author: "Jane Doe"
 #       org: "Acme Corp"
+#       url: "https://www.linkedin.com/posts/janedoe-..."
 #       rating: 5
 testimonials: []
 
-# External partnerships / affiliations to surface for authoritativeness
-# (emitted on /about and as Organization sameAs/knowsAbout where a URL is
-# given). Shape: { name, url? }. Leave empty to omit.
+# External partnerships / affiliations. Rendered ONLY under "## Partners"
+# on /about (this list is NOT wired into JSON-LD — it's a content/credibility
+# surface, not a structured-data signal). Per-entry fields:
+#   name  (REQUIRED) partner name. An entry without it is skipped.
+#   url   (optional) link. With a url the name renders as a link; without it,
+#         plain text.
+# Leave empty ([]) to omit.
+# Example:
+#   partners:
+#     - name: "Acme Corp"
+#       url: "https://acme.example"
 partners: []
 
 # -- Platform links --

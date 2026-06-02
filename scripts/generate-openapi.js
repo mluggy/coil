@@ -352,7 +352,7 @@ const spec = {
           "200": {
             description: "Discovery envelope describing the async surface.",
             headers: rateLimitResponseHeaders(),
-            content: { "application/json": { schema: { type: "object" } } },
+            content: { "application/json": { schema: { $ref: "#/components/schemas/JobsDiscovery" } } },
           },
           ...errorResponses,
         },
@@ -452,7 +452,7 @@ const spec = {
           "200": {
             description: "Discovery envelope.",
             headers: rateLimitResponseHeaders(),
-            content: { "application/json": { schema: { type: "object" } } },
+            content: { "application/json": { schema: { $ref: "#/components/schemas/JobsBatchDiscovery" } } },
           },
           ...errorResponses,
         },
@@ -524,17 +524,7 @@ const spec = {
             description: "Webhook catalog.",
             headers: rateLimitResponseHeaders(),
             content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    events_supported: { type: "array", items: { type: "string", enum: WEBHOOK_EVENTS } },
-                    registration_endpoint: { type: "string", format: "uri" },
-                    payload_schema: { type: "object" },
-                    example_payload: { $ref: "#/components/schemas/WebhookEvent" },
-                  },
-                },
-              },
+              "application/json": { schema: { $ref: "#/components/schemas/WebhookCatalog" } },
             },
           },
           ...errorResponses,
@@ -622,12 +612,7 @@ const spec = {
             description: "Unsubscribed (idempotent).",
             headers: rateLimitResponseHeaders(),
             content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: { id: { type: "string" }, status: { type: "string", enum: ["unsubscribed"] } },
-                },
-              },
+              "application/json": { schema: { $ref: "#/components/schemas/WebhookDeletion" } },
             },
           },
           ...errorResponses,
@@ -940,14 +925,7 @@ const spec = {
             description: "A JSON-RPC 2.0 response, or — for a batch request — an array of responses in request order.",
             headers: rateLimitResponseHeaders(),
             content: {
-              "application/json": {
-                schema: {
-                  oneOf: [
-                    { $ref: "#/components/schemas/JsonRpcResponse" },
-                    { $ref: "#/components/schemas/JsonRpcBatchResponse" },
-                  ],
-                },
-              },
+              "application/json": { schema: { $ref: "#/components/schemas/McpResponse" } },
             },
           },
           ...errorResponses,
@@ -1009,14 +987,7 @@ const spec = {
             description: "A JSON-RPC 2.0 response, or an array of responses for a batch request.",
             headers: rateLimitResponseHeaders(),
             content: {
-              "application/json": {
-                schema: {
-                  oneOf: [
-                    { $ref: "#/components/schemas/JsonRpcResponse" },
-                    { $ref: "#/components/schemas/JsonRpcBatchResponse" },
-                  ],
-                },
-              },
+              "application/json": { schema: { $ref: "#/components/schemas/McpResponse" } },
             },
           },
           ...errorResponses,
@@ -1574,6 +1545,69 @@ const spec = {
           result: { type: "object", description: "Present when status is `completed`. Shape mirrors the synchronous endpoint for the same `kind`." },
           error: { $ref: "#/components/schemas/Error" },
         },
+      },
+      JobsDiscovery: {
+        type: "object",
+        description: "Discovery envelope returned by GET /jobs describing the 202 Accepted async pattern.",
+        required: ["object", "pattern", "kinds_supported", "create_endpoint", "poll_url_template"],
+        properties: {
+          object: { type: "string", enum: ["jobs.discovery"] },
+          description: { type: "string" },
+          pattern: { type: "string", description: "The async pattern in use, e.g. '202 Accepted + poll'." },
+          kinds_supported: { type: "array", items: { type: "string", enum: ["ask", "search"] } },
+          create_endpoint: { type: "string", format: "uri", description: "POST here to create a job." },
+          poll_url_template: { type: "string", description: "RFC 6570 template for the polling URL, e.g. /jobs/{id}." },
+          example: {
+            type: "object",
+            description: "Example request/response pair for the async flow.",
+            additionalProperties: true,
+          },
+          docs_url: { type: "string", format: "uri" },
+        },
+      },
+      JobsBatchDiscovery: {
+        type: "object",
+        description: "Discovery envelope returned by GET /jobs/batch describing the array-body batch surface.",
+        required: ["object", "max_batch_size", "create_endpoint"],
+        properties: {
+          object: { type: "string", enum: ["jobs.batch.discovery"] },
+          description: { type: "string" },
+          max_batch_size: { type: "integer", description: "Maximum job specs per array body." },
+          create_endpoint: { type: "string", format: "uri" },
+          request_schema: { type: "string", description: "Pointer to the request schema (array of JobSpec)." },
+          response_schema: { type: "string", description: "Pointer to the response schema (JobBatchResponse)." },
+          example: { type: "object", additionalProperties: true },
+          docs_url: { type: "string", format: "uri" },
+        },
+      },
+      WebhookCatalog: {
+        type: "object",
+        description: "Webhook event catalog returned by GET /webhooks.",
+        required: ["events_supported", "registration_endpoint"],
+        properties: {
+          events_supported: { type: "array", items: { type: "string", enum: WEBHOOK_EVENTS } },
+          registration_endpoint: { type: "string", format: "uri" },
+          payload_schema: { type: "object", description: "JSON Schema of the delivery payload (see WebhookEvent)." },
+          example_payload: { $ref: "#/components/schemas/WebhookEvent" },
+        },
+      },
+      WebhookDeletion: {
+        type: "object",
+        description: "Idempotent unsubscribe acknowledgement returned by DELETE /webhooks/{id}.",
+        required: ["id", "status"],
+        properties: {
+          id: { type: "string", description: "The subscription id that was removed." },
+          status: { type: "string", enum: ["unsubscribed"] },
+        },
+      },
+      McpResponse: {
+        description:
+          "A single JSON-RPC 2.0 response, or — for a batch request — an array of " +
+          "responses in request order.",
+        oneOf: [
+          { $ref: "#/components/schemas/JsonRpcResponse" },
+          { $ref: "#/components/schemas/JsonRpcBatchResponse" },
+        ],
       },
       Error: {
         type: "object",

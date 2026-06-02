@@ -156,6 +156,39 @@ const agentAuth = {
   // Prose walkthrough lives at /auth.md.
   auth_md: `${SITE}/auth.md`,
   documentation: `${SITE}/auth.md`,
+  // Inline, self-contained prose so a parser that scores agent-auth
+  // documentation quality on THIS document alone (without fetching
+  // /auth.md) reads a complete "how an AI agent obtains and uses a token"
+  // guide — not just a pointer. Mirrors the /auth.md sections.
+  how_to_authenticate:
+    "AI agents authenticate with an optional OAuth 2.0 bearer token; every " +
+    "read endpoint also accepts anonymous (no Authorization header) calls. " +
+    "To obtain a token programmatically: (1) POST /oauth/register to get the " +
+    "public client_id (no client secret, token_endpoint_auth_method=none); " +
+    "(2) POST /oauth/token with grant_type=client_credentials (or exchange a " +
+    "/oauth/claim identity_assertion via the JWT-bearer grant) to receive an " +
+    "access_token; (3) send it as 'Authorization: Bearer <access_token>' on " +
+    "any /api/*, /ask, /status, or /mcp request; (4) POST /oauth/revoke to " +
+    "discard it (RFC 7009). Tokens are stateless JWS (EdDSA/HS256), verifiable " +
+    "against /oauth/jwks.json, with a one-hour TTL.",
+  token_request_example: {
+    method: "POST",
+    url: `${SITE}/oauth/token`,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=client_credentials&scope=${SCOPES.join("+")}`,
+  },
+  token_response_example: {
+    access_token: "<jws-bearer-token>",
+    token_type: "Bearer",
+    expires_in: 3600,
+    scope: SCOPES.join(" "),
+  },
+  authenticated_request_example: {
+    method: "GET",
+    url: `${SITE}/api/search?q=ai`,
+    headers: { Authorization: "Bearer <access_token>" },
+    note: "Anonymous (no Authorization header) is also accepted on every read endpoint.",
+  },
   www_authenticate_challenge: `${SITE}/agent/auth`,
   // Structured Agent Skill that walks the obtain → claim → use → revoke
   // flow (its body is /auth.md verbatim). Kept under `skills[]` now that

@@ -13,7 +13,16 @@ sys.modules.setdefault("google.genai", type(sys)("google.genai"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 
-from fix_srt import find_srt_files, validate_srt_output, count_srt_blocks
+from unittest.mock import MagicMock
+
+import fix_srt as fix_srt_module
+from fix_srt import (
+    clean_gemini_output,
+    count_srt_blocks,
+    find_srt_files,
+    fix_srt,
+    validate_srt_output,
+)
 
 
 class TestFindSrtFiles:
@@ -92,3 +101,68 @@ class TestValidateSrtOutput:
         corrected = "1\n00:00:01.000 --> 00:00:02.000\nHi\n"
         valid, reason = validate_srt_output(original, corrected)
         assert valid is True
+
+    def test_off_by_one_block_count_fails(self):
+        # Previously tolerated (±20% ratio); block counts must now match exactly.
+        original = "\n\n".join(
+            f"{i}\n00:00:0{i},000 --> 00:00:0{i},500\nline {i}" for i in range(1, 6)
+        ) + "\n"
+        corrected = "\n\n".join(
+            f"{i}\n00:00:0{i},000 --> 00:00:0{i},500\nline {i}" for i in range(1, 5)
+        ) + "\n"
+        valid, reason = validate_srt_output(original, corrected)
+        assert valid is False
+        assert "block count" in reason
+
+    def test_modified_timestamps_fail(self):
+        original = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+        corrected = "1\n00:00:01,000 --> 00:00:02,500\nHello\n"
+        valid, reason = validate_srt_output(original, corrected)
+        assert valid is False
+        assert "timestamp" in reason
+
+
+class TestCleanGeminiOutput:
+    def test_strips_code_fences(self):
+        wrapped = "```srt\n1\n00:00:01,000 --> 00:00:02,000\nHello\n```"
+        assert clean_gemini_output(wrapped) == "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+
+    def test_plain_output_untouched(self):
+        plain = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+        assert clean_gemini_output(plain) == plain
+
+    def test_none_returns_empty(self):
+        assert clean_gemini_output(None) == ""
+
+
+class TestFixSrtRetries:
+    SRT = "1\n00:00:01,000 --> 00:00:02,000\nHelo\n"
+    GOOD = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+
+    def _run(self, tmpdir, response_texts):
+        srt_path = os.path.join(tmpdir, "s1e1.srt")
+        with open(srt_path, "w") as f:
+            f.write(self.SRT)
+        client = MagicMock()
+        client.models.generate_content.side_effect = [
+            MagicMock(text=t) for t in response_texts
+        ]
+        from pathlib import Path
+        ok = fix_srt(client, "model", Path(srt_path), has_txt=False)
+        with open(srt_path) as f:
+            return ok, f.read(), client.models.generate_content.call_count
+
+    def test_retries_then_succeeds(self, capsys):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ok, content, calls = self._run(tmpdir, ["garbage, no timestamps", self.GOOD])
+            assert ok is True
+            assert content == self.GOOD
+            assert calls == 2
+
+    def test_gives_up_and_keeps_original(self, capsys):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad = ["garbage"] * fix_srt_module.MAX_ATTEMPTS
+            ok, content, calls = self._run(tmpdir, bad)
+            assert ok is False
+            assert content == self.SRT
+            assert calls == fix_srt_module.MAX_ATTEMPTS

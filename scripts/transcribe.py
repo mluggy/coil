@@ -18,6 +18,55 @@ from shared import project_root, validate_env_vars
 POLL_INTERVAL_SECONDS = 5
 MAX_POLL_RETRIES = 120
 
+R2_ENV_VARS = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT_URL", "R2_BUCKET"]
+
+
+def manifest_basenames(episodes_dir):
+    """Return sNeM basenames for every episode in episodes.yaml."""
+    manifest_path = os.path.join(episodes_dir, "episodes.yaml")
+    if not os.path.exists(manifest_path):
+        return []
+    with open(manifest_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    basenames = []
+    for number, episode in (data.get("episodes") or {}).items():
+        season = (episode or {}).get("season")
+        if season is None:
+            continue
+        basenames.append(f"s{season}e{number}")
+    return basenames
+
+
+def restore_missing_mp3s(episodes_dir):
+    """Download MP3s from R2 for manifest episodes missing both .mp3 and .srt.
+
+    MP3s are gitignored (R2 is canonical), so deleting a bad .srt leaves the
+    checkout with no audio to re-transcribe from. Pull the audio back first.
+    Silently a no-op when R2 credentials aren't configured.
+    """
+    if not all(os.environ.get(v) for v in R2_ENV_VARS):
+        return
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ["R2_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+    )
+    bucket = os.environ["R2_BUCKET"]
+
+    for basename in manifest_basenames(episodes_dir):
+        mp3_path = os.path.join(episodes_dir, f"{basename}.mp3")
+        srt_path = os.path.join(episodes_dir, f"{basename}.srt")
+        if os.path.exists(mp3_path) or os.path.exists(srt_path):
+            continue
+        try:
+            s3.download_file(bucket, f"{basename}.mp3", mp3_path)
+            # stderr — stdout is reserved for new SRT basenames the caller captures
+            print(f"Restored {basename}.mp3 from R2 for re-transcription", file=sys.stderr)
+        except Exception as e:
+            print(f"Could not restore {basename}.mp3 from R2: {e}", file=sys.stderr)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -45,6 +94,8 @@ def main():
 
     s3_client = boto3.client("s3", region_name=aws_region)
     transcribe_client = boto3.client("transcribe", region_name=aws_region)
+
+    restore_missing_mp3s(args.episodes_dir)
 
     mp3_files = glob.glob(os.path.join(args.episodes_dir, "*.mp3"))
 

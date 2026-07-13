@@ -59,7 +59,7 @@ class TestExtensions:
 
     def test_rejects_unknown_extensions(self):
         assert ".wav" not in EXTENSIONS
-        assert ".txt" not in EXTENSIONS
+        assert ".txt" in EXTENSIONS  # transcripts are synced alongside audio
 
 
 class TestMainUploadFlow:

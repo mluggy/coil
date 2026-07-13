@@ -171,4 +171,76 @@ class TestLanguageFromConfig:
                     transcribe.main()
 
             _, kwargs = tc.start_transcription_job.call_args
-            assert kwargs["LanguageOptions"] == ["he-IL"]
+            assert kwargs["LanguageCode"] == "he-IL"
+
+
+def _r2_env():
+    return {
+        "R2_ACCESS_KEY_ID": "key",
+        "R2_SECRET_ACCESS_KEY": "secret",
+        "R2_ENDPOINT_URL": "https://r2.example.com",
+        "R2_BUCKET": "bucket",
+    }
+
+
+def _write_manifest(tmpdir, entries):
+    lines = ["episodes:"]
+    for number, season in entries:
+        lines.append(f"  {number}:")
+        lines.append(f"    season: {season}")
+        lines.append(f"    title: Episode {number}")
+    with open(os.path.join(tmpdir, "episodes.yaml"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+class TestRestoreMissingMp3s:
+    def test_noop_without_r2_env(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_manifest(tmpdir, [(1, 1)])
+            with patch.dict(os.environ, {}, clear=True), \
+                 patch("transcribe.boto3.client") as client:
+                transcribe.restore_missing_mp3s(tmpdir)
+            client.assert_not_called()
+
+    def test_downloads_missing_episode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_manifest(tmpdir, [(54, 2)])
+            s3 = MagicMock()
+            with patch.dict(os.environ, _r2_env(), clear=True), \
+                 patch("transcribe.boto3.client", return_value=s3):
+                transcribe.restore_missing_mp3s(tmpdir)
+            s3.download_file.assert_called_once_with(
+                "bucket", "s2e54.mp3", os.path.join(tmpdir, "s2e54.mp3")
+            )
+
+    def test_skips_episode_with_srt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_manifest(tmpdir, [(54, 2)])
+            with open(os.path.join(tmpdir, "s2e54.srt"), "w") as f:
+                f.write("existing")
+            s3 = MagicMock()
+            with patch.dict(os.environ, _r2_env(), clear=True), \
+                 patch("transcribe.boto3.client", return_value=s3):
+                transcribe.restore_missing_mp3s(tmpdir)
+            s3.download_file.assert_not_called()
+
+    def test_skips_episode_with_mp3(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_manifest(tmpdir, [(54, 2)])
+            with open(os.path.join(tmpdir, "s2e54.mp3"), "wb") as f:
+                f.write(b"mp3")
+            s3 = MagicMock()
+            with patch.dict(os.environ, _r2_env(), clear=True), \
+                 patch("transcribe.boto3.client", return_value=s3):
+                transcribe.restore_missing_mp3s(tmpdir)
+            s3.download_file.assert_not_called()
+
+    def test_download_error_does_not_raise(self, capsys):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_manifest(tmpdir, [(54, 2)])
+            s3 = MagicMock()
+            s3.download_file.side_effect = Exception("404")
+            with patch.dict(os.environ, _r2_env(), clear=True), \
+                 patch("transcribe.boto3.client", return_value=s3):
+                transcribe.restore_missing_mp3s(tmpdir)
+            assert "Could not restore s2e54.mp3" in capsys.readouterr().err

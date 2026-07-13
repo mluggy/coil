@@ -20,6 +20,12 @@ from shared import project_root
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview"
 
+MAX_ATTEMPTS = 3
+
+TIMESTAMP_RE = re.compile(
+    r"\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}"
+)
+
 
 INSTRUCTION_WITH_TXT = """\
 You are a subtitle correction agent. You will receive two files:
@@ -75,18 +81,28 @@ def count_srt_blocks(text):
     return len(re.findall(r'^\d+\s*$', text, re.MULTILINE))
 
 
+def clean_gemini_output(text):
+    """Strip markdown code fences Gemini sometimes wraps around the SRT."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[^\n]*\n", "", text)
+        text = re.sub(r"\n```\s*$", "", text)
+        text = text.strip()
+    return text + "\n" if text else ""
+
+
 def validate_srt_output(original, corrected):
     """Validate that corrected SRT output looks valid compared to original."""
-    timestamp_pattern = r'\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}'
-    if not re.search(timestamp_pattern, corrected):
+    if not TIMESTAMP_RE.search(corrected):
         return False, "no SRT timestamp lines found in output"
 
     original_blocks = count_srt_blocks(original)
     corrected_blocks = count_srt_blocks(corrected)
-    if original_blocks > 0:
-        ratio = corrected_blocks / original_blocks
-        if ratio < 0.8 or ratio > 1.2:
-            return False, f"block count mismatch: original={original_blocks}, corrected={corrected_blocks}"
+    if original_blocks != corrected_blocks:
+        return False, f"block count mismatch: original={original_blocks}, corrected={corrected_blocks}"
+
+    if TIMESTAMP_RE.findall(original) != TIMESTAMP_RE.findall(corrected):
+        return False, "timestamps were modified"
 
     return True, ""
 
@@ -102,7 +118,7 @@ def load_gemini_model():
 
 
 def fix_srt(client, model, srt_path, has_txt):
-    """Fix a single SRT file using Gemini."""
+    """Fix a single SRT file using Gemini. Returns True on success."""
     srt_content = srt_path.read_text(encoding="utf-8")
 
     if has_txt:
@@ -114,19 +130,26 @@ def fix_srt(client, model, srt_path, has_txt):
         prompt = f"SRT file:\n{srt_content}\n\n{INSTRUCTION_WITHOUT_TXT}"
         mode = "best-effort"
 
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-    )
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+        )
 
-    corrected = response.text
-    valid, reason = validate_srt_output(srt_content, corrected)
-    if not valid:
-        print(f"Warning: skipping {srt_path.name} — invalid Gemini output: {reason}", file=sys.stderr)
-        return
+        corrected = clean_gemini_output(response.text)
+        valid, reason = validate_srt_output(srt_content, corrected)
+        if valid:
+            srt_path.write_text(corrected, encoding="utf-8")
+            print(f"{srt_path.name} ({mode})")
+            return True
 
-    srt_path.write_text(corrected, encoding="utf-8")
-    print(f"{srt_path.name} ({mode})")
+        print(
+            f"Warning: {srt_path.name} attempt {attempt}/{MAX_ATTEMPTS} — invalid Gemini output: {reason}",
+            file=sys.stderr,
+        )
+
+    print(f"Error: giving up on {srt_path.name} after {MAX_ATTEMPTS} attempts; keeping original", file=sys.stderr)
+    return False
 
 
 def main():
@@ -151,11 +174,17 @@ def main():
     model = load_gemini_model()
     srt_files = find_srt_files(args.episodes_dir, args.srt_files)
 
+    failures = []
     for srt_path, has_txt in srt_files:
         try:
-            fix_srt(client, model, srt_path, has_txt)
+            if not fix_srt(client, model, srt_path, has_txt):
+                failures.append(srt_path.name)
         except Exception as e:
             print(f"Error processing {srt_path.name}: {e}", file=sys.stderr)
+            failures.append(srt_path.name)
+
+    if failures:
+        sys.exit(f"fix_srt: failed to correct {len(failures)} file(s): {', '.join(failures)}")
 
 
 if __name__ == "__main__":

@@ -77,8 +77,13 @@ def find_srt_files(episodes_dir, srt_basenames=None):
 
 
 def count_srt_blocks(text):
-    """Count the number of SRT blocks by counting numbered lines."""
-    return len(re.findall(r'^\d+\s*$', text, re.MULTILINE))
+    """Count SRT blocks by timestamp lines.
+
+    Counting bare-number lines is ambiguous: subtitle *text* can be a bare
+    number too (e.g. a 20ms cue whose caption is "25"), inflating the count
+    and rejecting valid corrections. Timestamp lines are unambiguous.
+    """
+    return len(TIMESTAMP_RE.findall(text))
 
 
 def clean_gemini_output(text):

@@ -74,6 +74,12 @@ class TestCountSrtBlocks:
     def test_empty_text(self):
         assert count_srt_blocks("") == 0
 
+    def test_bare_number_subtitle_text_not_counted(self):
+        # Subtitle text that is itself a bare number (e.g. speaker said "25")
+        # must not inflate the block count.
+        text = "1\n00:00:01,000 --> 00:00:02,000\n25\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        assert count_srt_blocks(text) == 2
+
 
 class TestValidateSrtOutput:
     def test_valid_srt_passes(self):
@@ -113,6 +119,14 @@ class TestValidateSrtOutput:
         valid, reason = validate_srt_output(original, corrected)
         assert valid is False
         assert "block count" in reason
+
+    def test_correcting_bare_number_text_passes(self):
+        # Regression: s2e54 block 326's text was "25"; Gemini replacing it with
+        # words was rejected because the naive counter saw one fewer "block".
+        original = "1\n00:00:01,000 --> 00:00:02,000\n25\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        corrected = "1\n00:00:01,000 --> 00:00:02,000\ntwenty-five\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        valid, reason = validate_srt_output(original, corrected)
+        assert valid is True
 
     def test_modified_timestamps_fail(self):
         original = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"

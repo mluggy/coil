@@ -21,6 +21,7 @@ from fix_srt import (
     count_srt_blocks,
     find_srt_files,
     fix_srt,
+    restore_timestamps,
     validate_srt_output,
 )
 
@@ -79,6 +80,30 @@ class TestCountSrtBlocks:
         # must not inflate the block count.
         text = "1\n00:00:01,000 --> 00:00:02,000\n25\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
         assert count_srt_blocks(text) == 2
+
+
+class TestRestoreTimestamps:
+    def test_splices_original_timestamps_back(self):
+        # Fail-safe: Gemini rewrote a timestamp but the text correction is
+        # good — keep the correction, restore the authoritative timestamps.
+        original = "1\n00:00:01,019 --> 00:00:02,000\nHelo\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        corrected = "1\n00:00:01,020 --> 00:00:02,000\nHello\n\n2\n00:00:03.000 --> 00:00:04,000\nWorld\n"
+        restored = restore_timestamps(original, corrected)
+        assert "00:00:01,019 --> 00:00:02,000" in restored
+        assert "00:00:03,000 --> 00:00:04,000" in restored
+        assert "Hello" in restored
+        valid, reason = validate_srt_output(original, restored)
+        assert valid is True
+
+    def test_block_count_mismatch_left_untouched(self):
+        original = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        corrected = "1\n00:00:01,000 --> 00:00:02,000\nHello World\n"
+        assert restore_timestamps(original, corrected) == corrected
+
+    def test_identical_timestamps_unchanged(self):
+        original = "1\n00:00:01,000 --> 00:00:02,000\nHelo\n"
+        corrected = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+        assert restore_timestamps(original, corrected) == corrected
 
 
 class TestValidateSrtOutput:
@@ -172,6 +197,16 @@ class TestFixSrtRetries:
             assert ok is True
             assert content == self.GOOD
             assert calls == 2
+
+    def test_modified_timestamps_repaired_not_rejected(self, capsys):
+        # Regression: s2e55 failed all attempts with "timestamps were
+        # modified" — the correction must survive with original timestamps.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mangled = "1\n00:00:01,500 --> 00:00:02,000\nHello\n"
+            ok, content, calls = self._run(tmpdir, [mangled])
+            assert ok is True
+            assert content == self.GOOD
+            assert calls == 1
 
     def test_gives_up_and_keeps_original(self, capsys):
         with tempfile.TemporaryDirectory() as tmpdir:

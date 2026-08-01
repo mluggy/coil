@@ -96,6 +96,23 @@ def clean_gemini_output(text):
     return text + "\n" if text else ""
 
 
+def restore_timestamps(original, corrected):
+    """Splice the original timestamps into the corrected output.
+
+    Gemini is told to copy timestamps verbatim, but on long files it
+    occasionally rewrites a few (rounding milliseconds etc.), which would
+    fail validation and discard an otherwise good text correction. The
+    original timestamps are authoritative, so when the block count matches,
+    overwrite the corrected timestamps in order instead of rejecting.
+    """
+    original_ts = TIMESTAMP_RE.findall(original)
+    corrected_ts = TIMESTAMP_RE.findall(corrected)
+    if len(original_ts) != len(corrected_ts):
+        return corrected
+    ts_iter = iter(original_ts)
+    return TIMESTAMP_RE.sub(lambda _: next(ts_iter), corrected)
+
+
 def validate_srt_output(original, corrected):
     """Validate that corrected SRT output looks valid compared to original."""
     if not TIMESTAMP_RE.search(corrected):
@@ -142,6 +159,13 @@ def fix_srt(client, model, srt_path, has_txt):
         )
 
         corrected = clean_gemini_output(response.text)
+        restored = restore_timestamps(srt_content, corrected)
+        if restored != corrected:
+            print(
+                f"Note: {srt_path.name} — restored original timestamps in Gemini output",
+                file=sys.stderr,
+            )
+            corrected = restored
         valid, reason = validate_srt_output(srt_content, corrected)
         if valid:
             srt_path.write_text(corrected, encoding="utf-8")

@@ -1,12 +1,30 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { execSync } from "child_process";
+import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
 import { deriveConfig } from "./scripts/derive-config.js";
 
 const podcastConfig = deriveConfig(yaml.load(fs.readFileSync("podcast.yaml", "utf8")));
+
+// Content-hash versions for the data files the SPA renders from. Stamped
+// onto the preload link and exposed to the client as __DATA_VERSIONS__ so
+// the `?v=` URL form can be cached as immutable (middleware serves the
+// bare form with no-cache). The hash is of the file itself, so the URL —
+// and the browser's cached copy — survives deploys that don't change it.
+function dataVersion(file) {
+  try {
+    return createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 8);
+  } catch {
+    return "0"; // file not generated yet (fresh clone) — still a valid URL
+  }
+}
+const dataVersions = {
+  episodes: dataVersion("public/episodes.json"),
+  searchIndex: dataVersion("public/search-index.json"),
+};
 
 function buildHeadTags(config) {
   const sameAs = [
@@ -37,7 +55,7 @@ function buildHeadTags(config) {
     `<meta name="theme-color" content="${themeColor}">`,
     `<link rel="canonical" href="{{SITE_URL}}/">`,
     `<link rel="manifest" href="/manifest.json">`,
-    `<link rel="preload" href="/episodes.json" as="fetch" crossorigin>`,
+    `<link rel="preload" href="/episodes.json?v=${dataVersions.episodes}" as="fetch" crossorigin>`,
     `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`,
     `<meta name="mobile-web-app-capable" content="yes">`,
     `<style nonce="{{CSP_NONCE}}">:root{--bg:${config.bg_dark||"#0a0a0b"}}[data-theme="light"]{--bg:${config.bg_light||"#fafaf9"}}body{background:var(--bg)}</style>`,
@@ -135,6 +153,11 @@ function buildHeadTags(config) {
     );
   }
   lines.push(`<script type="application/ld+json">${jsonLd}</script>`);
+  // Deploy-race safety net: if the hashed entry bundle 404s (the page's HTML
+  // was rendered moments before a deploy replaced the assets), reload once to
+  // pick up the new HTML. A sessionStorage flag (cleared by main.jsx on a
+  // successful boot) prevents reload loops when the failure is anything else.
+  lines.push(`<script nonce="{{CSP_NONCE}}">window.addEventListener("error",function(e){var t=e.target||{};if(t.tagName==="SCRIPT"&&t.src&&t.src.indexOf("/assets/")!==-1){try{if(!sessionStorage.getItem("assetReload")){sessionStorage.setItem("assetReload","1");location.reload()}}catch(r){}}},true)</script>`);
   // Inline theme init — reads cookie and applies data-theme before React hydrates (prevents FOUC)
   lines.push(`<script nonce="{{CSP_NONCE}}">!function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=(dark|light)/);var t=m?m[1]:"${config.default_theme||"dark"}";document.documentElement.setAttribute("data-theme",t);document.querySelector('meta[name=theme-color]').content=t==="light"?"${config.bg_light||"#fafaf9"}":"${config.bg_dark||"#0a0a0b"}"}catch(e){}}()</script>`);
   return lines.join("\n    ");
@@ -143,6 +166,7 @@ function buildHeadTags(config) {
 export default defineConfig({
   define: {
     __PODCAST_CONFIG__: JSON.stringify(podcastConfig),
+    __DATA_VERSIONS__: JSON.stringify(dataVersions),
   },
   plugins: [
     react(),

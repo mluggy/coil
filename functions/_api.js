@@ -67,7 +67,7 @@ function corsHeaders() {
 export function apiHeaders(extra = {}) {
   return {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "public, max-age=60, stale-while-revalidate=600",
+    "Cache-Control": "public, max-age=60, must-revalidate",
     Vary: "Accept, Prefer",
     "API-Version": API_VERSION,
     ...corsHeaders(),

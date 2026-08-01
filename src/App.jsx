@@ -58,7 +58,14 @@ export default function App() {
     const fetchEpisodes = (opts = {}) => {
       if (!opts.force && Date.now() - lastFetch < 60_000) return;
       lastFetch = Date.now();
-      fetch("/episodes.json")
+      // First load: the ?v= content-hash URL — immutable-cached and already
+      // preloaded from <head>, so repeat visits cost zero requests. Focus/
+      // online refetches: the bare URL with revalidation forced, so a
+      // long-lived tab sees episodes published after its HTML was rendered.
+      const versioned = typeof __DATA_VERSIONS__ !== "undefined"
+        ? `/episodes.json?v=${__DATA_VERSIONS__.episodes}`
+        : "/episodes.json";
+      fetch(firstLoad ? versioned : "/episodes.json", firstLoad ? undefined : { cache: "no-cache" })
         .then((r) => r.json())
         .then((data) => {
           setEpisodes(data);

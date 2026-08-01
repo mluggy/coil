@@ -195,7 +195,7 @@ export async function handleWebhooks(request, baseUrl) {
     const body = catalog(baseUrl);
     return new Response(request.method === "HEAD" ? null : JSON.stringify(body, null, 2), {
       status: 200,
-      headers: apiHeaders({ "Cache-Control": "public, max-age=300, stale-while-revalidate=600" }),
+      headers: apiHeaders({ "Cache-Control": "public, max-age=300, must-revalidate" }),
     });
   }
 

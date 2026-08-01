@@ -537,7 +537,7 @@ export function buildUiHttpResponse(uri, baseUrl) {
     status: 200,
     headers: {
       "Content-Type": MCP_APP_MIME,
-      "Cache-Control": "public, max-age=60, stale-while-revalidate=600",
+      "Cache-Control": "public, max-age=60, must-revalidate",
       "Content-Security-Policy": doc.httpCsp,
       "X-Content-Type-Options": "nosniff",
       // Hosts (chatgpt.com, claude.ai) embed via <iframe src="…"> from

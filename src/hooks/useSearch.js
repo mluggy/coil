@@ -47,7 +47,9 @@ export default function useSearch(episodes, externalQuery) {
   useEffect(() => {
     if (!externalQuery || fetchedRef.current) return;
     fetchedRef.current = true;
-    fetch("/search-index.json")
+    fetch(typeof __DATA_VERSIONS__ !== "undefined"
+      ? `/search-index.json?v=${__DATA_VERSIONS__.searchIndex}`
+      : "/search-index.json")
       .then((r) => r.json())
       .then(setSearchTexts)
       .catch(() => {});

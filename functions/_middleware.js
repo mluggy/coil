@@ -92,10 +92,21 @@ function securityHeaders(nonce) {
   };
 }
 
-// HTML pages are the entry point of every visit. Short hard-cache keeps
-// fresh content propagating quickly; SWR serves cached copies instantly
-// while revalidating in the background.
-const HTML_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=604800";
+// ─── Cache policy ─────────────────────────────────────────────────────────
+// One rule, no exceptions: a URL is either content-addressed (hashed
+// /assets/* bundles, ?v=<hash> data files) and cached for a year as
+// immutable, or it can change over time and must ALWAYS be revalidated
+// before reuse. stale-while-revalidate is banned — browsers honor it in
+// their HTTP cache, so it served week-old HTML pointing at asset hashes a
+// newer deploy had deleted (blank pages) and week-old episode lists after
+// a publish. Revalidation is cheap: everything mutable carries an ETag and
+// 304s when unchanged.
+const HTML_CACHE_CONTROL = "no-cache"; // SSR pages + agent/markdown views: render is per-request anyway
+const DATA_CACHE_CONTROL = "no-cache"; // unversioned episodes.json / search-index.json — ETag 304s
+const MEDIA_CACHE_CONTROL = "public, no-cache"; // R2 media — ETag + If-Range validated in serveR2
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const FEED_CACHE_CONTROL = "public, max-age=300, must-revalidate"; // rss.xml — pollers tolerate 5 min
+const DOCS_CACHE_CONTROL = "public, max-age=3600, must-revalidate"; // agent docs/well-known — change only on deploy
 
 function esc(s) {
   return (s || "")
@@ -1554,31 +1565,91 @@ function redirect301(url) {
 }
 
 
+// Normalize an entity-tag header value for comparison against R2's
+// httpEtag: first tag only, weak prefix and quotes stripped.
+function bareEtag(value) {
+  return (value || "").split(",")[0].trim().replace(/^W\//i, "").replace(/"/g, "");
+}
+
 async function serveR2(env, key, request) {
   if (!env?.R2_BUCKET) return null;
-  const rangeHeader = request.headers.get("Range");
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  const ifRange = request.headers.get("If-Range");
+  let rangeHeader = request.headers.get("Range");
+
+  const baseHeaders = (obj) => {
+    const ext = key.split(".").pop().toLowerCase();
+    const headers = new Headers();
+    headers.set("Content-Type", CONTENT_TYPES[ext] || obj.httpMetadata?.contentType || "application/octet-stream");
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Cache-Control", MEDIA_CACHE_CONTROL);
+    if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
+    return headers;
+  };
+
+  // If-Range (RFC 9110 §13.1.5): honor Range only while the validator still
+  // matches the current object; otherwise ignore Range and serve the full
+  // body. Without this, a client resuming from a cached prefix of an OLD
+  // upload gets 206 slices of the NEW file spliced in — corrupt audio.
+  // (A date validator, or any mismatch, safely degrades to the full 200.)
+  if (rangeHeader && ifRange) {
+    const head = await env.R2_BUCKET.head(key);
+    if (!head) return null;
+    if (bareEtag(ifRange) !== bareEtag(head.httpEtag)) rangeHeader = null;
+  }
+
+  // Conditional GET → 304 without reading the body from R2.
+  if (ifNoneMatch && !rangeHeader) {
+    const obj = await env.R2_BUCKET.get(key, {
+      onlyIf: { etagDoesNotMatch: bareEtag(ifNoneMatch) },
+    });
+    if (!obj) return null;
+    if (!obj.body) {
+      // Precondition failed — client's copy is current.
+      return new Response(null, { status: 304, headers: baseHeaders(obj) });
+    }
+    const headers = baseHeaders(obj);
+    headers.set("Content-Length", String(obj.size));
+    return new Response(obj.body, { status: 200, headers });
+  }
+
   let options = {};
   if (rangeHeader) {
     const m = rangeHeader.match(/bytes=(\d*)-(\d*)/);
-    if (m) {
-      const start = m[1] ? parseInt(m[1]) : undefined;
-      const end = m[2] ? parseInt(m[2]) : undefined;
-      options.range = {};
-      if (start !== undefined) options.range.offset = start;
-      if (end !== undefined && start !== undefined) options.range.length = end - start + 1;
+    if (m && (m[1] || m[2])) {
+      if (m[1]) {
+        options.range = { offset: parseInt(m[1]) };
+        if (m[2]) options.range.length = parseInt(m[2]) - parseInt(m[1]) + 1;
+      } else {
+        // Suffix form (bytes=-N): last N bytes.
+        options.range = { suffix: parseInt(m[2]) };
+      }
     }
   }
-  const obj = await env.R2_BUCKET.get(key, options);
+
+  let obj;
+  try {
+    obj = await env.R2_BUCKET.get(key, options);
+  } catch {
+    // R2 throws on unsatisfiable ranges — answer 416, not a 500.
+    const head = await env.R2_BUCKET.head(key);
+    if (!head) return null;
+    return new Response(null, {
+      status: 416,
+      headers: {
+        "Content-Range": `bytes */${head.size}`,
+        "Cache-Control": MEDIA_CACHE_CONTROL,
+      },
+    });
+  }
   if (!obj) return null;
-  const ext = key.split(".").pop().toLowerCase();
-  const headers = new Headers();
-  headers.set("Content-Type", CONTENT_TYPES[ext] || obj.httpMetadata?.contentType || "application/octet-stream");
-  headers.set("Accept-Ranges", "bytes");
-  headers.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=604800");
-  if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
-  if (rangeHeader && obj.range) {
-    headers.set("Content-Range", `bytes ${obj.range.offset}-${obj.range.offset + obj.range.length - 1}/${obj.size}`);
-    headers.set("Content-Length", String(obj.range.length));
+
+  const headers = baseHeaders(obj);
+  if (options.range && obj.range) {
+    const offset = obj.range.offset ?? (obj.range.suffix != null ? obj.size - obj.range.suffix : 0);
+    const length = obj.range.length ?? (obj.range.suffix != null ? Math.min(obj.range.suffix, obj.size) : obj.size - offset);
+    headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${obj.size}`);
+    headers.set("Content-Length", String(length));
     return new Response(obj.body, { status: 206, headers });
   }
   headers.set("Content-Length", String(obj.size));
@@ -1656,46 +1727,53 @@ const REWRITE_CONTENT_TYPES = {
 };
 
 const REWRITE_CACHE_CONTROL = {
-  "/rss.xml": "public, max-age=300, stale-while-revalidate=604800",
-  "/sitemap.xml": "public, max-age=3600, stale-while-revalidate=604800",
-  "/llms.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/index.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/episodes/llms.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/api/llms.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/docs/llms.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/llms.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/agent.json": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/agent-card.json": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/schema-map.xml": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/openapi.json": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/openapi.yaml": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/agent-skills/index.json": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/ai-plugin.json": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/api-catalog": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/http-message-signatures-directory": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/oauth-authorization-server": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/oauth-protected-resource": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/openid-configuration": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/x402/supported": "public, max-age=3600, stale-while-revalidate=604800",
-  "/.well-known/discovery/resources": "public, max-age=3600, stale-while-revalidate=604800",
-  "/AGENTS.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/docs.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/pricing.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/compare.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/auth.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/llms-full.txt": "public, max-age=3600, stale-while-revalidate=604800",
-  "/SKILL.md": "public, max-age=3600, stale-while-revalidate=604800",
-  "/about.md": "public, max-age=3600, stale-while-revalidate=604800",
+  "/rss.xml": FEED_CACHE_CONTROL,
+  "/robots.txt": DOCS_CACHE_CONTROL,
+  "/sitemap.xml": DOCS_CACHE_CONTROL,
+  "/llms.txt": DOCS_CACHE_CONTROL,
+  "/index.md": DOCS_CACHE_CONTROL,
+  "/episodes/llms.txt": DOCS_CACHE_CONTROL,
+  "/api/llms.txt": DOCS_CACHE_CONTROL,
+  "/docs/llms.txt": DOCS_CACHE_CONTROL,
+  "/.well-known/llms.txt": DOCS_CACHE_CONTROL,
+  "/.well-known/agent.json": DOCS_CACHE_CONTROL,
+  "/.well-known/agent-card.json": DOCS_CACHE_CONTROL,
+  "/.well-known/schema-map.xml": DOCS_CACHE_CONTROL,
+  "/.well-known/openapi.json": DOCS_CACHE_CONTROL,
+  "/.well-known/openapi.yaml": DOCS_CACHE_CONTROL,
+  "/.well-known/agent-skills/index.json": DOCS_CACHE_CONTROL,
+  "/.well-known/ai-plugin.json": DOCS_CACHE_CONTROL,
+  "/.well-known/api-catalog": DOCS_CACHE_CONTROL,
+  "/.well-known/http-message-signatures-directory": DOCS_CACHE_CONTROL,
+  "/.well-known/oauth-authorization-server": DOCS_CACHE_CONTROL,
+  "/.well-known/oauth-protected-resource": DOCS_CACHE_CONTROL,
+  "/.well-known/openid-configuration": DOCS_CACHE_CONTROL,
+  "/.well-known/x402/supported": DOCS_CACHE_CONTROL,
+  "/.well-known/discovery/resources": DOCS_CACHE_CONTROL,
+  "/AGENTS.md": DOCS_CACHE_CONTROL,
+  "/docs.md": DOCS_CACHE_CONTROL,
+  "/pricing.md": DOCS_CACHE_CONTROL,
+  "/compare.md": DOCS_CACHE_CONTROL,
+  "/auth.md": DOCS_CACHE_CONTROL,
+  "/llms-full.txt": DOCS_CACHE_CONTROL,
+  "/SKILL.md": DOCS_CACHE_CONTROL,
+  "/about.md": DOCS_CACHE_CONTROL,
 };
 
-// Cache rules for static files served through middleware (mirrors _headers)
+// Cache rules for static files served through middleware (mirrors _headers).
+// The two data JSONs are what the SPA renders from — the build stamps a
+// content-hash `?v=` onto their URLs (vite.config.js), so the versioned
+// form is immutable and the bare form (agents, curl) always revalidates.
 const STATIC_CACHE_RULES = {
-  "/episodes.json": "public, max-age=60, stale-while-revalidate=604800",
-  "/search-index.json": "public, max-age=60, stale-while-revalidate=604800",
-  "/cover.png": "public, max-age=86400, stale-while-revalidate=604800",
+  "/episodes.json": DATA_CACHE_CONTROL,
+  "/search-index.json": DATA_CACHE_CONTROL,
+  "/cover.png": "public, no-cache",
 };
 
-const ASSETS_CACHE_CONTROL = "public, max-age=31536000, immutable";
+// URLs that become immutable when requested with a `?v=` content hash.
+const VERSIONED_DATA_PATHS = new Set(["/episodes.json", "/search-index.json"]);
+
+const ASSETS_CACHE_CONTROL = IMMUTABLE_CACHE_CONTROL;
 
 async function rewriteSiteUrl(request, next) {
   const resp = await next();
@@ -1871,7 +1949,7 @@ export async function onRequest({ request, next, env }) {
         },
       };
       const headers = apiHeaders({
-        "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+        "Cache-Control": "public, max-age=300, must-revalidate",
       });
       return new Response(request.method === "HEAD" ? null : JSON.stringify(body, null, 2), {
         status: 200,
@@ -1940,7 +2018,7 @@ export async function onRequest({ request, next, env }) {
     if (literal.status === 200 && !literalIsSpa) {
       const headers = new Headers(literal.headers);
       headers.set("Content-Type", "text/markdown; charset=utf-8");
-      headers.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=604800");
+      headers.set("Cache-Control", DOCS_CACHE_CONTROL);
       headers.set("Vary", "Accept");
       return new Response(literal.body, { status: 200, headers });
     }
@@ -1973,7 +2051,7 @@ export async function onRequest({ request, next, env }) {
     return new Response(md, {
       headers: apiHeaders({
         "Content-Type": "text/markdown; charset=utf-8",
-        "Cache-Control": "public, max-age=3600, stale-while-revalidate=604800",
+        "Cache-Control": DOCS_CACHE_CONTROL,
         Vary: "Accept",
         Link: linkHeader(baseUrl, null),
       }),
@@ -2013,7 +2091,7 @@ export async function onRequest({ request, next, env }) {
         status: upstream.status,
         headers: {
           "Content-Type": REWRITE_CONTENT_TYPES[target] || "text/markdown; charset=utf-8",
-          "Cache-Control": REWRITE_CACHE_CONTROL[target] || "public, max-age=3600, stale-while-revalidate=604800",
+          "Cache-Control": REWRITE_CACHE_CONTROL[target] || DOCS_CACHE_CONTROL,
           Vary: "Accept",
           Link: linkHeader(baseUrl, null),
         },
@@ -2043,7 +2121,9 @@ export async function onRequest({ request, next, env }) {
     }
     const cacheControl = path.startsWith("/assets/")
       ? ASSETS_CACHE_CONTROL
-      : STATIC_CACHE_RULES[path];
+      : VERSIONED_DATA_PATHS.has(path) && url.searchParams.get("v")
+        ? IMMUTABLE_CACHE_CONTROL
+        : STATIC_CACHE_RULES[path];
     if (cacheControl) {
       const headers = new Headers(resp.headers);
       headers.set("Cache-Control", cacheControl);

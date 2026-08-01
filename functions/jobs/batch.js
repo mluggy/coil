@@ -169,7 +169,7 @@ export async function onRequestGet({ request }) {
     {
       status: 200,
       headers: apiHeaders({
-        "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+        "Cache-Control": "public, max-age=300, must-revalidate",
       }),
     }
   );

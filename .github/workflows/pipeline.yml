@@ -36,10 +36,16 @@ jobs:
           # changed .txt transcripts (LFS still only smudges HEAD's files).
           fetch-depth: 0
 
+      # ubuntu-latest ships with ffmpeg preinstalled; apt is only a fallback.
+      # (Replaces FedericoCarboni/setup-ffmpeg, which flaked on external
+      # binary downloads and ran on the deprecated node20 runtime.)
       - name: Install ffmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: release
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -1
 
       - name: Setup Python
         uses: actions/setup-python@v5

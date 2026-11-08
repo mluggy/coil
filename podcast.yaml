@@ -332,7 +332,7 @@ transcribe: true
 # GEMINI_API_KEY is set and a new SRT was generated). Preview models are
 # updated often; if you see "model not found" errors, bump this to whatever
 # is current at https://ai.google.dev/gemini-api/docs/models
-gemini_model: gemini-pro-latest
+gemini_model: gemini-3.1-pro-preview
 
 # -- Analytics --
 # Google Analytics 4 measurement ID (e.g. G-A1B2C3D4E5).

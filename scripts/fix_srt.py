@@ -199,7 +199,8 @@ def main():
         print("Error: missing required environment variable: GEMINI_API_KEY", file=sys.stderr)
         sys.exit(1)
 
-    client = genai.Client(api_key=gemini_key)
+    # Pin v1beta: preview models (e.g. gemini-3.1-pro-preview) are not served on v1.
+    client = genai.Client(api_key=gemini_key, http_options={"api_version": "v1beta"})
     model = load_gemini_model()
     srt_files = find_srt_files(args.episodes_dir, args.srt_files)
 
